@@ -1,6 +1,6 @@
 # CS224N Final Project: Instruction -> Action Program Modeling
 
-This repo trains and evaluates a small Toolformer-style model that maps natural language instructions to a structured action program.
+This repo trains and evaluates a model that maps natural language instructions to a structured action program.
 
 Example:
 
@@ -15,6 +15,21 @@ The codebase includes:
 - evaluation with strict and trajectory-based metrics
 - a pseudo-label/self-training step
 
+## Action Semantics
+
+The action DSL is in `src/actions.py`, and execution semantics are in `src/sim.py`.
+
+- `[forward:v]`: move forward by distance bin `v`
+- `[backward:v]`: move backward by distance bin `v`
+- `[left:v]`: turn left by angle bin `v`
+- `[right:v]`: turn right by angle bin `v`
+- `[bark:0]`: no-op on position/heading, event token only
+
+Bin values:
+
+- Distance bins map to `{10:1.0, 30:3.0, 60:6.0, 100:10.0}`
+- Turn bins map to `{10:15°, 30:45°, 60:90°, 100:180°}`
+
 ## Repository Layout
 
 - `src/actions.py`: DSL definition, validation/parsing, serialization.
@@ -25,7 +40,9 @@ The codebase includes:
 - `src/sim.py`: simple 2D simulator and trajectory similarity.
 - `src/self_train.py`: candidate generation + pseudo-label filtering.
 - `src/utils.py`: model/tokenizer loading and constrained decoding FSM.
-- `src/toolformer.py`: prototype/scratch file (not main training pipeline).
+- `src/score_predictions.py`: model-agnostic evaluator for predicted programs.
+- `src/make_baseline_preds.py`: quick oracle/random prediction generators.
+- `src/toolformer.py`: prototype/scratch file (not used in main pipeline).
 
 ## Environment Setup
 
@@ -121,6 +138,34 @@ python3 -m src.eval --model outputs/sft_base --test data/held_test.jsonl --const
 python3 -m src.eval --model outputs/sft_base --test data/held_control.jsonl --constrained 1
 ```
 
+## Scoring Predictions Directly (No Model Dependency)
+
+If you already have predicted programs (or want quick baseline numbers), evaluate them directly:
+
+```bash
+python3 -m src.score_predictions \
+  --gold data/iid_test.jsonl \
+  --pred preds.jsonl \
+  --pred_key pred_program
+```
+
+`--pred` can be:
+
+- JSONL with `pred_program` (or `program`) field per row
+- plain text file with one predicted program per line
+
+Quick baselines:
+
+```bash
+# Oracle baseline (upper bound sanity check)
+python3 -m src.make_baseline_preds --gold data/iid_test.jsonl --out data/preds_oracle.jsonl --mode oracle
+python3 -m src.score_predictions --gold data/iid_test.jsonl --pred data/preds_oracle.jsonl
+
+# Random baseline
+python3 -m src.make_baseline_preds --gold data/iid_test.jsonl --out data/preds_random.jsonl --mode random --seed 0
+python3 -m src.score_predictions --gold data/iid_test.jsonl --pred data/preds_random.jsonl
+```
+
 ## Self-Training (Pseudo Labels)
 
 `src/self_train.py` samples `M` candidate programs per instruction, scores each candidate against reference trajectories, and keeps high-utility pseudo labels (threshold `tau`).
@@ -128,7 +173,7 @@ python3 -m src.eval --model outputs/sft_base --test data/held_control.jsonl --co
 Current script uses hardcoded defaults and is run as:
 
 ```bash
-python3 src/self_train.py
+python3 -m src.self_train
 ```
 
 Defaults expect:
@@ -148,6 +193,6 @@ Defaults expect:
 
 ## Notes / Current Limitations
 
-- `src/toolformer.py` is experimental and not wired into the main pipeline.
+- `src/toolformer.py` is experimental and not wired into the current pipeline.
 - `src/self_train.py` currently has no CLI args.
 - `src/actions.py` defines `first_invalid_reason` twice; the second definition overrides the first.

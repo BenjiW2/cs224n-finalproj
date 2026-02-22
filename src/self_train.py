@@ -2,8 +2,12 @@ import json
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from actions import parse, is_valid
-from sim import execute, trajectory_score
+try:
+    from .actions import parse, is_valid
+    from .sim import execute, trajectory_score
+except ImportError:
+    from actions import parse, is_valid
+    from sim import execute, trajectory_score
 
 PROMPTTEMP = "Instruction: {instruct}\nAction sequence:"
 
