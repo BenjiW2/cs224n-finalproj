@@ -1,15 +1,17 @@
 # src/eval.py
 import argparse
+import random
 from typing import Dict, List, Tuple
 from collections import Counter
 
 import torch
 
 from .utils import load_model_and_tokenizer, read_jsonl, make_prefix_allowed_tokens_fn
-from .actions import is_valid, parse, parse_loose, extract_program_prefix
+from .actions import is_valid, parse, parse_loose, extract_program_prefix, first_invalid_reason, serialize
 from .sim import execute, trajectory_score
 
 PROMPT_TMPL = "Instruction: {instr}\nAction sequence:"
+DEMO_TMPL = "Instruction: {instr}\nAction sequence: {prog}"
 
 def levenshtein(a: List[str], b: List[str]) -> int:
     # simple DP for small sequences
@@ -40,9 +42,44 @@ def step_f1(pred: List[Tuple[str,int]], gold: List[Tuple[str,int]]) -> Tuple[flo
     f1 = 0.0 if (prec+rec)==0 else (2*prec*rec)/(prec+rec)
     return prec, rec, f1
 
+def tool_step_f1(pred: List[Tuple[str,int]], gold: List[Tuple[str,int]]) -> Tuple[float,float,float]:
+    pred_tools = [t for (t, _) in pred]
+    gold_tools = [t for (t, _) in gold]
+    L = max(len(pred_tools), len(gold_tools))
+    if L == 0:
+        return 1.0, 1.0, 1.0
+    tp = 0
+    for i in range(min(len(pred_tools), len(gold_tools))):
+        if pred_tools[i] == gold_tools[i]:
+            tp += 1
+    prec = tp / max(len(pred_tools), 1)
+    rec = tp / max(len(gold_tools), 1)
+    f1 = 0.0 if (prec + rec) == 0 else (2 * prec * rec) / (prec + rec)
+    return prec, rec, f1
+
+def build_fewshot_prefix(rows: List[Dict], num_shots: int, seed: int) -> str:
+    if num_shots <= 0 or len(rows) == 0:
+        return ""
+    rng = random.Random(seed)
+    idxs = list(range(len(rows)))
+    rng.shuffle(idxs)
+    demos = []
+    for i in idxs[:min(num_shots, len(rows))]:
+        r = rows[i]
+        demos.append(DEMO_TMPL.format(instr=str(r["instruction"]).strip(), prog=str(r["program"]).strip()))
+    return "\n\n".join(demos) + "\n\n"
+
 @torch.no_grad()
-def generate_program(model, tok, instruction: str, constrained: bool, max_new_tokens: int, temperature: float):
-    prompt = PROMPT_TMPL.format(instr=instruction)
+def generate_program(
+    model,
+    tok,
+    instruction: str,
+    constrained: bool,
+    max_new_tokens: int,
+    temperature: float,
+    fewshot_prefix: str = "",
+):
+    prompt = fewshot_prefix + PROMPT_TMPL.format(instr=instruction)
     inputs = tok(prompt, return_tensors="pt")
     gen_kwargs = dict(
         max_new_tokens=max_new_tokens,
@@ -61,33 +98,63 @@ def generate_program(model, tok, instruction: str, constrained: bool, max_new_to
     completion = tok.decode(out[0][prompt_len:], skip_special_tokens=True)
     prog = extract_program_prefix(completion)
     if prog is None:
+        # Fall back to a tolerant parser (handles leading model chatter before calls).
+        acts = parse_loose(completion)
+        if acts is not None:
+            prog = serialize(acts)
+    if prog is None:
         prog = completion.strip().splitlines()[0].strip()
     return prog
 
-def eval_file(model_path: str, test_path: str, constrained: bool, max_new_tokens: int, temperature: float):
+def eval_file(
+    model_path: str,
+    test_path: str,
+    constrained: bool,
+    max_new_tokens: int,
+    temperature: float,
+    fewshot_path: str = "",
+    num_shots: int = 0,
+    fewshot_seed: int = 0,
+):
     model, tok = load_model_and_tokenizer(model_path)
     model.eval()
 
     rows = read_jsonl(test_path)
+    fewshot_rows = read_jsonl(fewshot_path) if fewshot_path else []
+    fewshot_prefix = build_fewshot_prefix(fewshot_rows, num_shots=num_shots, seed=fewshot_seed)
 
     metrics = Counter()
     precs, recs, f1s = [], [], []
+    tprecs, trecs, tf1s = [], [], []
     edit_tools = []
     length_ok = 0
     traj_scores = []
+    invalid_reasons = Counter()
 
     for r in rows:
         gold_prog = r["program"].strip()
         gold_actions = parse(gold_prog)
 
-        pred_prog = generate_program(model, tok, r["instruction"], constrained, max_new_tokens, temperature)
+        pred_prog = generate_program(
+            model,
+            tok,
+            r["instruction"],
+            constrained,
+            max_new_tokens,
+            temperature,
+            fewshot_prefix=fewshot_prefix,
+        )
 
         metrics["total"] += 1
         strict_valid = is_valid(pred_prog)
         if strict_valid:
             metrics["valid"] += 1
+        else:
+            invalid_reasons[first_invalid_reason(pred_prog)] += 1
         
         pred_actions = parse_loose(pred_prog)  # best-effort parse
+        if pred_actions is not None:
+            metrics["parseable"] += 1
 
         if pred_actions is not None and gold_actions is not None:
             # exact match (canonical program string match)
@@ -99,6 +166,10 @@ def eval_file(model_path: str, test_path: str, constrained: bool, max_new_tokens
 
             pred_tools = [t for (t,_) in pred_actions]
             gold_tools = [t for (t,_) in gold_actions]
+            tp, tr, tf1 = tool_step_f1(pred_actions, gold_actions)
+            tprecs.append(tp); trecs.append(tr); tf1s.append(tf1)
+            if pred_tools == gold_tools:
+                metrics["tool_exact"] += 1
             edit_tools.append(levenshtein(pred_tools, gold_tools))
 
             if len(pred_actions) == len(gold_actions):
@@ -118,13 +189,20 @@ def eval_file(model_path: str, test_path: str, constrained: bool, max_new_tokens
     out = {
         "total": total,
         "valid_rate": valid / max(total,1),
+        "parseable_rate": metrics["parseable"] / max(total,1),
         "exact_match": exact / max(total,1),
+        "tool_exact_match": metrics["tool_exact"] / max(total,1),
         "step_precision": sum(precs)/max(len(precs),1),
         "step_recall": sum(recs)/max(len(recs),1),
         "step_f1": sum(f1s)/max(len(f1s),1),
+        "tool_step_precision": sum(tprecs)/max(len(tprecs),1),
+        "tool_step_recall": sum(trecs)/max(len(trecs),1),
+        "tool_step_f1": sum(tf1s)/max(len(tf1s),1),
         "tool_edit_dist": sum(edit_tools)/max(len(edit_tools),1),
         "length_acc": length_ok / max(total,1),
         "mean_traj_score": sum(traj_scores)/max(len(traj_scores),1),
+        "num_shots": int(num_shots),
+        "invalid_reasons": dict(invalid_reasons),
     }
     return out
 
@@ -135,9 +213,21 @@ def main():
     ap.add_argument("--constrained", type=int, default=0)
     ap.add_argument("--max_new_tokens", type=int, default=64)
     ap.add_argument("--temperature", type=float, default=0.0)  # 0 => greedy
+    ap.add_argument("--fewshot_path", type=str, default="")
+    ap.add_argument("--num_shots", type=int, default=0)
+    ap.add_argument("--fewshot_seed", type=int, default=0)
     args = ap.parse_args()
 
-    res = eval_file(args.model, args.test, bool(args.constrained), args.max_new_tokens, args.temperature)
+    res = eval_file(
+        args.model,
+        args.test,
+        bool(args.constrained),
+        args.max_new_tokens,
+        args.temperature,
+        fewshot_path=args.fewshot_path,
+        num_shots=args.num_shots,
+        fewshot_seed=args.fewshot_seed,
+    )
     print(res)
 
 if __name__ == "__main__":

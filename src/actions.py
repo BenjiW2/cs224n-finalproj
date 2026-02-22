@@ -37,8 +37,15 @@ def parse_loose(text: str) -> Optional[List[Tuple[str, int]]]:
     More forgiving parse:
     - allows whitespace between calls
     - ignores trailing junk after the last complete call
+    - tolerates leading junk before the first call
     """
     prefix = extract_program_prefix(text)
+    if prefix is None and text is not None:
+        # If model outputs preamble/thinking text first, try from first '[' onward.
+        s = text.strip()
+        i = s.find("[")
+        if i != -1:
+            prefix = extract_program_prefix(s[i:])
     if prefix is None:
         return None
 

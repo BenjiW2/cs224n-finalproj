@@ -80,6 +80,22 @@ def step_f1(pred: List[Tuple[str, int]], gold: List[Tuple[str, int]]) -> Tuple[f
     return prec, rec, f1
 
 
+def tool_step_f1(pred: List[Tuple[str, int]], gold: List[Tuple[str, int]]) -> Tuple[float, float, float]:
+    pred_tools = [t for (t, _) in pred]
+    gold_tools = [t for (t, _) in gold]
+    L = max(len(pred_tools), len(gold_tools))
+    if L == 0:
+        return 1.0, 1.0, 1.0
+    tp = 0
+    for i in range(min(len(pred_tools), len(gold_tools))):
+        if pred_tools[i] == gold_tools[i]:
+            tp += 1
+    prec = tp / max(len(pred_tools), 1)
+    rec = tp / max(len(gold_tools), 1)
+    f1 = 0.0 if (prec + rec) == 0 else (2 * prec * rec) / (prec + rec)
+    return prec, rec, f1
+
+
 def score(gold_rows: List[Dict], preds: List[str]) -> Dict:
     if len(preds) < len(gold_rows):
         preds = preds + [""] * (len(gold_rows) - len(preds))
@@ -89,6 +105,7 @@ def score(gold_rows: List[Dict], preds: List[str]) -> Dict:
     metrics = Counter()
     invalid_reasons = Counter()
     precs, recs, f1s = [], [], []
+    tprecs, trecs, tf1s = [], [], []
     edit_tools = []
     length_ok = 0
     traj_scores = []
@@ -117,8 +134,15 @@ def score(gold_rows: List[Dict], preds: List[str]) -> Dict:
             recs.append(r)
             f1s.append(f1)
 
+            tp, tr, tf1 = tool_step_f1(pred_actions, gold_actions)
+            tprecs.append(tp)
+            trecs.append(tr)
+            tf1s.append(tf1)
+
             pred_tools = [t for (t, _) in pred_actions]
             gold_tools = [t for (t, _) in gold_actions]
+            if pred_tools == gold_tools:
+                metrics["tool_exact"] += 1
             edit_tools.append(levenshtein(pred_tools, gold_tools))
 
             if len(pred_actions) == len(gold_actions):
@@ -135,9 +159,13 @@ def score(gold_rows: List[Dict], preds: List[str]) -> Dict:
         "valid_rate": metrics["valid"] / max(total, 1),
         "parseable_rate": parsed / max(total, 1),
         "exact_match": metrics["exact"] / max(total, 1),
+        "tool_exact_match": metrics["tool_exact"] / max(total, 1),
         "step_precision": sum(precs) / max(len(precs), 1),
         "step_recall": sum(recs) / max(len(recs), 1),
         "step_f1": sum(f1s) / max(len(f1s), 1),
+        "tool_step_precision": sum(tprecs) / max(len(tprecs), 1),
+        "tool_step_recall": sum(trecs) / max(len(trecs), 1),
+        "tool_step_f1": sum(tf1s) / max(len(tf1s), 1),
         "tool_edit_dist": sum(edit_tools) / max(len(edit_tools), 1),
         "length_acc": length_ok / max(total, 1),
         "mean_traj_score": sum(traj_scores) / max(len(traj_scores), 1),

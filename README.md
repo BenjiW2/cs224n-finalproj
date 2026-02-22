@@ -42,6 +42,7 @@ Bin values:
 - `src/utils.py`: model/tokenizer loading and constrained decoding FSM.
 - `src/score_predictions.py`: model-agnostic evaluator for predicted programs.
 - `src/make_baseline_preds.py`: quick oracle/random prediction generators.
+- `src/run_milestone_eval.py`: run a model/split/shot evaluation matrix and save JSONL.
 - `src/toolformer.py`: prototype/scratch file (not used in main pipeline).
 
 ## Environment Setup
@@ -138,6 +139,45 @@ python3 -m src.eval --model outputs/sft_base --test data/held_test.jsonl --const
 python3 -m src.eval --model outputs/sft_base --test data/held_control.jsonl --constrained 1
 ```
 
+Few-shot baseline (in-context demos from a train file):
+
+```bash
+python3 -m src.eval \
+  --model gpt2 \
+  --test data/iid_test.jsonl \
+  --constrained 0 \
+  --temperature 0.0 \
+  --fewshot_path data/iid_train.jsonl \
+  --num_shots 4 \
+  --fewshot_seed 0
+```
+
+Run a full milestone matrix:
+
+```bash
+python3 -m src.run_milestone_eval \
+  --models gpt2 \
+  --tests data/iid_test.jsonl,data/len_test.jsonl,data/held_test.jsonl,data/held_control.jsonl \
+  --fewshot_path data/iid_train.jsonl \
+  --num_shots_list 0,4 \
+  --constrained 1 \
+  --temperature 0.0 \
+  --out outputs/milestone_eval.jsonl
+```
+
+Qwen pretrained sweep example:
+
+```bash
+python3 -m src.run_milestone_eval \
+  --models Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-4B \
+  --tests data/iid_test.jsonl,data/len_test.jsonl,data/held_test.jsonl,data/held_control.jsonl \
+  --fewshot_path data/iid_train.jsonl \
+  --num_shots_list 0,4 \
+  --constrained 1 \
+  --temperature 0.0 \
+  --out outputs/qwen_pretrained_matrix.jsonl
+```
+
 ## Scoring Predictions Directly (No Model Dependency)
 
 If you already have predicted programs (or want quick baseline numbers), evaluate them directly:
@@ -185,8 +225,11 @@ Defaults expect:
 ## Metrics Reported (`src/eval.py`)
 
 - `valid_rate`: fraction of syntactically valid programs.
+- `parseable_rate`: fraction that are parseable with loose parser.
 - `exact_match`: exact canonical string match vs gold program.
+- `tool_exact_match`: exact tool sequence match ignoring values.
 - `step_precision`, `step_recall`, `step_f1`: positional step match on `(tool, value)`.
+- `tool_step_precision`, `tool_step_recall`, `tool_step_f1`: positional step match on tool identity only.
 - `tool_edit_dist`: Levenshtein distance on tool sequences.
 - `length_acc`: exact action-count match.
 - `mean_traj_score`: simulator trajectory similarity in `[0,1]`.
