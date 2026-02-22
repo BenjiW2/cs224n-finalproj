@@ -13,7 +13,6 @@ The codebase includes:
 - challenge split construction (IID, length generalization, held-out compositions)
 - supervised fine-tuning (SFT) on GPT-2
 - evaluation with strict syntax and sequence-level metrics
-- a pseudo-label/self-training step
 
 ## Action Semantics
 
@@ -37,8 +36,6 @@ Bin values:
 - `src/splits.py`: split creation and distribution stats.
 - `src/train_sft.py`: SFT training with Hugging Face `Trainer`.
 - `src/eval.py`: decoding + evaluation metrics.
-- `src/sim.py`: optional simulator (used in self-training utility scoring).
-- `src/self_train.py`: candidate generation + pseudo-label filtering.
 - `src/utils.py`: model/tokenizer loading and constrained decoding FSM.
 - `src/score_predictions.py`: model-agnostic evaluator for predicted programs.
 - `src/run_milestone_eval.py`: run a model/split/shot evaluation matrix and save JSONL.
@@ -314,22 +311,6 @@ python3 -m src.score_predictions \
 - JSONL with `pred_program` (or `program`) field per row
 - plain text file with one predicted program per line
 
-## Self-Training (Pseudo Labels)
-
-`src/self_train.py` samples `M` candidate programs per instruction, scores each candidate against reference trajectories, and keeps high-utility pseudo labels (threshold `tau`).
-
-Current script uses hardcoded defaults and is run as:
-
-```bash
-python3 -m src.self_train
-```
-
-Defaults expect:
-
-- base checkpoint: `outputs/sft_base`
-- unlabeled file: `data/unlabeled_len234.jsonl`
-- output pseudo labels: `data/pseudo_iter1.jsonl`
-
 ## Metrics Reported (`src/eval.py`)
 
 - `valid_rate`: fraction of syntactically valid programs.
@@ -344,5 +325,4 @@ Defaults expect:
 ## Notes / Current Limitations
 
 - `src/toolformer.py` is experimental and not wired into the current pipeline.
-- `src/self_train.py` currently has no CLI args.
 - `src/actions.py` defines `first_invalid_reason` twice; the second definition overrides the first.
