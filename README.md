@@ -37,13 +37,11 @@ Bin values:
 - `src/splits.py`: split creation and distribution stats.
 - `src/train_sft.py`: SFT training with Hugging Face `Trainer`.
 - `src/eval.py`: decoding + evaluation metrics.
-- `src/sim.py`: simple 2D simulator and trajectory similarity.
 - `src/self_train.py`: candidate generation + pseudo-label filtering.
 - `src/utils.py`: model/tokenizer loading and constrained decoding FSM.
 - `src/score_predictions.py`: model-agnostic evaluator for predicted programs.
 - `src/make_baseline_preds.py`: quick oracle/random prediction generators.
 - `src/run_milestone_eval.py`: run a model/split/shot evaluation matrix and save JSONL.
-- `src/toolformer.py`: prototype/scratch file (not used in main pipeline).
 
 ## Environment Setup
 
