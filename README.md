@@ -178,6 +178,119 @@ python3 -m src.run_milestone_eval \
   --out outputs/qwen_pretrained_matrix.jsonl
 ```
 
+## Milestone Report Guide
+
+Use this section as the source of truth when writing the milestone paper.
+
+### Research Questions + Hypotheses
+
+1. Can pretrained LMs produce valid action programs zero-shot?
+   Hypothesis: syntax validity is moderate, exact sequence match is low.
+2. Does few-shot prompting improve tool-sequence generation?
+   Hypothesis: `tool_step_f1` improves more than strict `step_f1`.
+3. Can SFT solve IID mapping?
+   Hypothesis: IID `exact_match` and `step_f1` increase substantially over pretrained baselines.
+4. Does performance drop under distribution shift (length/composition)?
+   Hypothesis: `len_test` and `held_test` underperform IID.
+5. Is compositional failure specific (held-out combos) rather than general hardness?
+   Hypothesis: `held_test` < `held_control` on `tool_step_f1` and `mean_traj_score`.
+
+### Canonical Experiment Matrix
+
+Run and report these rows (minimum milestone set):
+
+| Model | Train Split | Test Split | Shots | Purpose |
+|---|---|---|---:|---|
+| Random baseline | none | `iid_test` | 0 | floor |
+| Random baseline | none | `len_test` | 0 | floor (length shift) |
+| Random baseline | none | `held_test` | 0 | floor (composition shift) |
+| Random baseline | none | `held_control` | 0 | floor control |
+| Qwen3-0.6B | none | all 4 tests | 0 | zero-shot baseline |
+| Qwen3-1.7B | none | all 4 tests | 0 | zero-shot baseline |
+| Qwen3-4B | none | all 4 tests | 0 | zero-shot baseline |
+| Qwen3-0.6B | none | all 4 tests | 4 | few-shot baseline |
+| Qwen3-1.7B | none | all 4 tests | 4 | few-shot baseline |
+| Qwen3-4B | none | all 4 tests | 4 | few-shot baseline |
+| Chosen SFT model | `iid_train` | `iid_test` | 0 | IID performance |
+| Chosen SFT model | `iid_train` | `len_test` | 0 | length generalization |
+| Chosen SFT model | `iid_train` | `held_test` | 0 | compositional generalization |
+| Chosen SFT model | `iid_train` | `held_control` | 0 | compositional control |
+
+Optional extensions:
+
+- SFT on `held_train` and evaluate on `held_test`/`held_control`
+- SFT on `len_train` and evaluate on `len_test`
+
+### Metrics To Emphasize In The Paper
+
+Primary (table/main claims):
+
+- `exact_match`
+- `step_f1` (tool + value)
+- `tool_step_f1` (tool identity only)
+- `valid_rate`
+- `mean_traj_score`
+
+Secondary (diagnostics):
+
+- `parseable_rate`
+- `tool_exact_match`
+- `tool_edit_dist`
+- `length_acc`
+- `invalid_reasons`
+
+### Reproducibility Defaults
+
+Use the following fixed settings unless explicitly ablated:
+
+- Decoding: greedy (`--temperature 0.0`)
+- Constrained decoding: on (`--constrained 1`) for main numbers
+- Few-shot seed: `--fewshot_seed 0`
+- Data generation seed: `--seed 0`
+- Split seed: `--seed 0`
+- Report model names exactly as passed in CLI
+- Record hardware (GPU type, VRAM) and runtime per experiment block
+
+### Result Logging Convention
+
+Recommended output files:
+
+- `outputs/pretrained_matrix.jsonl` (Qwen zero/few-shot)
+- `outputs/sft_iid_matrix.jsonl`
+- `outputs/sft_held_matrix.jsonl` (optional)
+- `outputs/sft_len_matrix.jsonl` (optional)
+
+Each JSONL row should represent one `(model, test_split, num_shots)` setting.
+Keep all raw JSONL outputs for appendix/reproducibility.
+
+### Error Analysis Protocol
+
+For each key condition (at least pretrained-best and SFT model on `held_test`):
+
+1. Sample 25-50 failures.
+2. Label failure type:
+   - invalid syntax
+   - wrong tool identity
+   - correct tools but wrong values
+   - wrong sequence length
+   - near-miss trajectory (high trajectory score, low exact match)
+3. Report 3-5 representative examples with:
+   - instruction
+   - gold program
+   - predicted program
+   - brief diagnosis
+
+### Milestone Writing Checklist
+
+- Problem statement and task definition are clear.
+- Action semantics are stated (`left/right` are turns).
+- Data generation and split construction are documented.
+- Baselines include pretrained zero/few-shot and random floor.
+- Main table includes IID, length shift, held-out composition, and control.
+- Metrics include both strict and tool-only views.
+- Error analysis includes qualitative examples + category counts.
+- Limitations and next steps are explicit.
+
 ## Scoring Predictions Directly (No Model Dependency)
 
 If you already have predicted programs (or want quick baseline numbers), evaluate them directly:
