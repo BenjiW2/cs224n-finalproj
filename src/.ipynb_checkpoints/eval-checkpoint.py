@@ -6,7 +6,7 @@ from collections import Counter
 import torch
 
 from .utils import load_model_and_tokenizer, read_jsonl, make_prefix_allowed_tokens_fn
-from .actions import is_valid, parse
+from .actions import is_valid, parse, parse_loose, extract_program_prefix
 from .sim import execute, trajectory_score
 
 PROMPT_TMPL = "Instruction: {instr}\nAction sequence:"
@@ -58,9 +58,10 @@ def generate_program(model, tok, instruction: str, constrained: bool, max_new_to
 
     out = model.generate(**inputs, **gen_kwargs)
     prompt_len = inputs["input_ids"].shape[1]
-    completion = tok.decode(out[0][prompt_len:], skip_special_tokens=True).strip()
-    # Extract likely first-line program
-    prog = completion.splitlines()[0].strip()
+    completion = tok.decode(out[0][prompt_len:], skip_special_tokens=True)
+    prog = extract_program_prefix(completion)
+    if prog is None:
+        prog = completion.strip().splitlines()[0].strip()
     return prog
 
 def eval_file(model_path: str, test_path: str, constrained: bool, max_new_tokens: int, temperature: float):
@@ -82,11 +83,11 @@ def eval_file(model_path: str, test_path: str, constrained: bool, max_new_tokens
         pred_prog = generate_program(model, tok, r["instruction"], constrained, max_new_tokens, temperature)
 
         metrics["total"] += 1
-        if is_valid(pred_prog):
+        strict_valid = is_valid(pred_prog)
+        if strict_valid:
             metrics["valid"] += 1
-            pred_actions = parse(pred_prog)
-        else:
-            pred_actions = None
+        
+        pred_actions = parse_loose(pred_prog)  # best-effort parse
 
         if pred_actions is not None and gold_actions is not None:
             # exact match (canonical program string match)

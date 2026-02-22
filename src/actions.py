@@ -14,6 +14,56 @@ PROGRAM_RE = re.compile(
     r"^(\[(forward|backward|left|right):(10|30|60|100)\]|\[bark:0\])+$"
 )
 
+# Acceptable prefix: one or more calls, possibly separated by whitespace.
+PROGRAM_PREFIX_RE = re.compile(
+    r"^((?:\s*(?:\[(?:forward|backward|left|right):(?:10|30|60|100)\]|\[bark:0\]))+)"
+)
+
+def extract_program_prefix(text: str) -> Optional[str]:
+    """
+    Returns the longest leading substring that looks like a sequence of tool calls.
+    Useful when the model outputs extra text after the program.
+    """
+    if text is None:
+        return None
+    s = text.strip()
+    m = PROGRAM_PREFIX_RE.match(s)
+    if not m:
+        return None
+    return m.group(1).strip()
+
+def parse_loose(text: str) -> Optional[List[Tuple[str, int]]]:
+    """
+    More forgiving parse:
+    - allows whitespace between calls
+    - ignores trailing junk after the last complete call
+    """
+    prefix = extract_program_prefix(text)
+    if prefix is None:
+        return None
+
+    # remove internal whitespace between calls so existing strict parser works
+    compact = re.sub(r"\s+", "", prefix)
+    return parse(compact)
+
+def first_invalid_reason(program: str) -> str:
+    if program is None:
+        return "none"
+    s = program.strip()
+    if not s.startswith("["):
+        return "no_open_bracket"
+    prefix = extract_program_prefix(s)
+    if prefix is None:
+        return "no_valid_prefix"
+    compact = re.sub(r"\s+", "", prefix)
+    if not is_valid(compact):
+        return "prefix_not_strict_valid"
+    if parse(compact) is None:
+        return "parse_failed"
+    if compact != s:
+        return "has_trailing_or_whitespace"
+    return "ok"
+
 def is_valid(program: str) -> bool:
     if program is None:
         return False
