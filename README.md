@@ -39,7 +39,6 @@ Bin values:
 - `src/utils.py`: model/tokenizer loading and constrained decoding FSM.
 - `src/score_predictions.py`: model-agnostic evaluator for predicted programs.
 - `src/run_milestone_eval.py`: run a model/split/shot evaluation matrix and save JSONL.
-- `src/toolformer.py`: prototype/scratch file (not used in main pipeline).
 
 ## Environment Setup
 
@@ -324,5 +323,4 @@ python3 -m src.score_predictions \
 
 ## Notes / Current Limitations
 
-- `src/toolformer.py` is experimental and not wired into the current pipeline.
 - `src/actions.py` defines `first_invalid_reason` twice; the second definition overrides the first.
