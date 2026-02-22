@@ -41,7 +41,6 @@ Bin values:
 - `src/self_train.py`: candidate generation + pseudo-label filtering.
 - `src/utils.py`: model/tokenizer loading and constrained decoding FSM.
 - `src/score_predictions.py`: model-agnostic evaluator for predicted programs.
-- `src/make_baseline_preds.py`: quick oracle/random prediction generators.
 - `src/run_milestone_eval.py`: run a model/split/shot evaluation matrix and save JSONL.
 - `src/toolformer.py`: prototype/scratch file (not used in main pipeline).
 
@@ -201,10 +200,6 @@ Run and report these rows (minimum milestone set):
 
 | Model | Train Split | Test Split | Shots | Purpose |
 |---|---|---|---:|---|
-| Random baseline | none | `iid_test` | 0 | floor |
-| Random baseline | none | `len_test` | 0 | floor (length shift) |
-| Random baseline | none | `held_test` | 0 | floor (composition shift) |
-| Random baseline | none | `held_control` | 0 | floor control |
 | Qwen3-0.6B | none | all 4 tests | 0 | zero-shot baseline |
 | Qwen3-1.7B | none | all 4 tests | 0 | zero-shot baseline |
 | Qwen3-4B | none | all 4 tests | 0 | zero-shot baseline |
@@ -284,7 +279,7 @@ For each key condition (at least pretrained-best and SFT model on `held_test`):
 - Problem statement and task definition are clear.
 - Action semantics are stated (`left/right` are turns).
 - Data generation and split construction are documented.
-- Baselines include pretrained zero/few-shot and random floor.
+- Baselines include pretrained zero/few-shot.
 - Main table includes IID, length shift, held-out composition, and control.
 - Metrics include both strict and tool-only views.
 - Error analysis includes qualitative examples + category counts.
@@ -305,18 +300,6 @@ python3 -m src.score_predictions \
 
 - JSONL with `pred_program` (or `program`) field per row
 - plain text file with one predicted program per line
-
-Quick baselines:
-
-```bash
-# Oracle baseline (upper bound sanity check)
-python3 -m src.make_baseline_preds --gold data/iid_test.jsonl --out data/preds_oracle.jsonl --mode oracle
-python3 -m src.score_predictions --gold data/iid_test.jsonl --pred data/preds_oracle.jsonl
-
-# Random baseline
-python3 -m src.make_baseline_preds --gold data/iid_test.jsonl --out data/preds_random.jsonl --mode random --seed 0
-python3 -m src.score_predictions --gold data/iid_test.jsonl --pred data/preds_random.jsonl
-```
 
 ## Self-Training (Pseudo Labels)
 
