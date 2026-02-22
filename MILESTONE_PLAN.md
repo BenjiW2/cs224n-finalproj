@@ -59,7 +59,6 @@ Primary:
 - `step_f1` (tool+value)
 - `tool_step_f1` (tool-only)
 - `valid_rate`
-- `mean_traj_score`
 
 Diagnostic:
 
@@ -181,7 +180,7 @@ Use one row per `(model, train_split, test_split, shots)`:
 - Exact match
 - Step F1
 - Tool-step F1
-- Mean trajectory score
+- Tool edit distance
 
 ## Division Of Labor
 

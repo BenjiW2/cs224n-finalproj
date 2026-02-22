@@ -12,12 +12,12 @@ The codebase includes:
 - synthetic data generation
 - challenge split construction (IID, length generalization, held-out compositions)
 - supervised fine-tuning (SFT) on GPT-2
-- evaluation with strict and trajectory-based metrics
+- evaluation with strict syntax and sequence-level metrics
 - a pseudo-label/self-training step
 
 ## Action Semantics
 
-The action DSL is in `src/actions.py`, and execution semantics are in `src/sim.py`.
+The action DSL is in `src/actions.py`.
 
 - `[forward:v]`: move forward by distance bin `v`
 - `[backward:v]`: move backward by distance bin `v`
@@ -37,7 +37,7 @@ Bin values:
 - `src/splits.py`: split creation and distribution stats.
 - `src/train_sft.py`: SFT training with Hugging Face `Trainer`.
 - `src/eval.py`: decoding + evaluation metrics.
-- `src/sim.py`: simple 2D simulator and trajectory similarity.
+- `src/sim.py`: optional simulator (used in self-training utility scoring).
 - `src/self_train.py`: candidate generation + pseudo-label filtering.
 - `src/utils.py`: model/tokenizer loading and constrained decoding FSM.
 - `src/score_predictions.py`: model-agnostic evaluator for predicted programs.
@@ -193,7 +193,7 @@ Use this section as the source of truth when writing the milestone paper.
 4. Does performance drop under distribution shift (length/composition)?
    Hypothesis: `len_test` and `held_test` underperform IID.
 5. Is compositional failure specific (held-out combos) rather than general hardness?
-   Hypothesis: `held_test` < `held_control` on `tool_step_f1` and `mean_traj_score`.
+   Hypothesis: `held_test` < `held_control` on `tool_step_f1`.
 
 ### Canonical Experiment Matrix
 
@@ -229,7 +229,6 @@ Primary (table/main claims):
 - `step_f1` (tool + value)
 - `tool_step_f1` (tool identity only)
 - `valid_rate`
-- `mean_traj_score`
 
 Secondary (diagnostics):
 
@@ -273,7 +272,7 @@ For each key condition (at least pretrained-best and SFT model on `held_test`):
    - wrong tool identity
    - correct tools but wrong values
    - wrong sequence length
-   - near-miss trajectory (high trajectory score, low exact match)
+   - near-miss sequence (high tool overlap, low exact match)
 3. Report 3-5 representative examples with:
    - instruction
    - gold program
@@ -345,7 +344,6 @@ Defaults expect:
 - `tool_step_precision`, `tool_step_recall`, `tool_step_f1`: positional step match on tool identity only.
 - `tool_edit_dist`: Levenshtein distance on tool sequences.
 - `length_acc`: exact action-count match.
-- `mean_traj_score`: simulator trajectory similarity in `[0,1]`.
 
 ## Notes / Current Limitations
 

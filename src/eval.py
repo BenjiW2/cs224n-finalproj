@@ -8,7 +8,6 @@ import torch
 
 from .utils import load_model_and_tokenizer, read_jsonl, make_prefix_allowed_tokens_fn
 from .actions import is_valid, parse, parse_loose, extract_program_prefix, first_invalid_reason, serialize
-from .sim import execute, trajectory_score
 
 PROMPT_TMPL = "Instruction: {instr}\nAction sequence:"
 DEMO_TMPL = "Instruction: {instr}\nAction sequence: {prog}"
@@ -128,7 +127,6 @@ def eval_file(
     tprecs, trecs, tf1s = [], [], []
     edit_tools = []
     length_ok = 0
-    traj_scores = []
     invalid_reasons = Counter()
 
     for r in rows:
@@ -174,10 +172,6 @@ def eval_file(
 
             if len(pred_actions) == len(gold_actions):
                 length_ok += 1
-
-            traj = execute(pred_actions)
-            traj_ref = execute(gold_actions)
-            traj_scores.append(trajectory_score(traj, traj_ref))
         else:
             # invalid program or parse failure
             pass
@@ -200,7 +194,6 @@ def eval_file(
         "tool_step_f1": sum(tf1s)/max(len(tf1s),1),
         "tool_edit_dist": sum(edit_tools)/max(len(edit_tools),1),
         "length_acc": length_ok / max(total,1),
-        "mean_traj_score": sum(traj_scores)/max(len(traj_scores),1),
         "num_shots": int(num_shots),
         "invalid_reasons": dict(invalid_reasons),
     }
