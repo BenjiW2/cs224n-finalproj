@@ -25,6 +25,7 @@ def main():
     ap.add_argument("--fewshot_path", type=str, default="")
     ap.add_argument("--num_shots_list", type=str, default="0")
     ap.add_argument("--fewshot_seed", type=int, default=0)
+    ap.add_argument("--include_task_spec", type=int, default=1)
     args = ap.parse_args()
 
     models = parse_csv(args.models)
@@ -42,6 +43,7 @@ def main():
                     "temperature": float(args.temperature),
                     "max_new_tokens": int(args.max_new_tokens),
                     "num_shots": int(num_shots),
+                    "include_task_spec": int(bool(args.include_task_spec)),
                 }
                 try:
                     metrics = eval_file(
@@ -53,6 +55,7 @@ def main():
                         fewshot_path=args.fewshot_path,
                         num_shots=num_shots,
                         fewshot_seed=args.fewshot_seed,
+                        include_task_spec=bool(args.include_task_spec),
                     )
                     res.update(metrics)
                     res["status"] = "ok"

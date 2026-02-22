@@ -5,7 +5,7 @@ This repo trains and evaluates a model that maps natural language instructions t
 Example:
 
 - Instruction: `turn left a bit, then move forward for a while, then bark`
-- Program: `[left:30][forward:60][bark:0]`
+- Program: `[left:45][forward:60][bark:0]`
 
 The codebase includes:
 
@@ -27,8 +27,8 @@ The action DSL is in `src/actions.py`.
 
 Bin values:
 
-- Distance bins map to `{10:1.0, 30:3.0, 60:6.0, 100:10.0}`
-- Turn bins map to `{10:15°, 30:45°, 60:90°, 100:180°}`
+- Distance bins (`forward/backward`) are `{10, 30, 60, 100}`
+- Turn-angle bins (`left/right`) are `{15, 45, 90, 180}`
 
 ## Repository Layout
 
@@ -66,6 +66,8 @@ JSONL rows (used by training/eval) look like:
 ```
 
 Training/eval scripts rely on `instruction` and `program`. Other fields are used for split analysis.
+
+Note: if you generated data before the angle-bin update, regenerate it. New valid turn values are `{15,45,90,180}`.
 
 ## End-to-End Pipeline
 
@@ -127,15 +129,16 @@ python3 -m src.eval \
   --test data/iid_test.jsonl \
   --constrained 1 \
   --temperature 0.0 \
+  --include_task_spec 0 \
   --max_new_tokens 64
 ```
 
 Challenge sets:
 
 ```bash
-python3 -m src.eval --model outputs/sft_base --test data/len_test.jsonl --constrained 1
-python3 -m src.eval --model outputs/sft_base --test data/held_test.jsonl --constrained 1
-python3 -m src.eval --model outputs/sft_base --test data/held_control.jsonl --constrained 1
+python3 -m src.eval --model outputs/sft_base --test data/len_test.jsonl --constrained 1 --include_task_spec 0
+python3 -m src.eval --model outputs/sft_base --test data/held_test.jsonl --constrained 1 --include_task_spec 0
+python3 -m src.eval --model outputs/sft_base --test data/held_control.jsonl --constrained 1 --include_task_spec 0
 ```
 
 Few-shot baseline (in-context demos from a train file):
@@ -148,6 +151,7 @@ python3 -m src.eval \
   --temperature 0.0 \
   --fewshot_path data/iid_train.jsonl \
   --num_shots 4 \
+  --include_task_spec 1 \
   --fewshot_seed 0
 ```
 
@@ -160,6 +164,7 @@ python3 -m src.run_milestone_eval \
   --fewshot_path data/iid_train.jsonl \
   --num_shots_list 0,4 \
   --constrained 1 \
+  --include_task_spec 1 \
   --temperature 0.0 \
   --out outputs/milestone_eval.jsonl
 ```
@@ -173,9 +178,15 @@ python3 -m src.run_milestone_eval \
   --fewshot_path data/iid_train.jsonl \
   --num_shots_list 0,4 \
   --constrained 1 \
+  --include_task_spec 1 \
   --temperature 0.0 \
   --out outputs/qwen_pretrained_matrix.jsonl
 ```
+
+Prompt note:
+
+- `--include_task_spec 1` prepends explicit format instructions (recommended for pretrained zero/few-shot baselines).
+- `--include_task_spec 0` uses only `Instruction: ... / Action sequence:` (recommended for SFT checkpoints trained with that minimal prompt format).
 
 ## Milestone Report Guide
 
@@ -239,6 +250,8 @@ Use the following fixed settings unless explicitly ablated:
 
 - Decoding: greedy (`--temperature 0.0`)
 - Constrained decoding: on (`--constrained 1`) for main numbers
+- Pretrained baselines: `--include_task_spec 1`
+- SFT checkpoints: `--include_task_spec 0`
 - Few-shot seed: `--fewshot_seed 0`
 - Data generation seed: `--seed 0`
 - Split seed: `--seed 0`

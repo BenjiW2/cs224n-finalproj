@@ -2,21 +2,29 @@
 import re
 from typing import List, Optional, Tuple, Dict, Set
 
-MOVE_TOOLS = ["forward", "backward", "left", "right"]
+DIST_TOOLS = ["forward", "backward"]
+TURN_TOOLS = ["left", "right"]
+MOVE_TOOLS = DIST_TOOLS + TURN_TOOLS
 EVENT_TOOLS = ["bark"]  # keep v1 simple; add "stop" later if desired
 ALL_TOOLS = MOVE_TOOLS + EVENT_TOOLS
 
-BINS = [10, 30, 60, 100]
+DIST_BINS = [10, 30, 60, 100]
+TURN_BINS = [15, 45, 90, 180]
+# Backward compatibility alias for older imports.
+BINS = DIST_BINS
 BARK_VAL = 0
+
+DIST_BIN_RE = r"(?:10|30|60|100)"
+TURN_BIN_RE = r"(?:15|45|90|180)"
 
 # Strict regex: concatenation of valid calls only.
 PROGRAM_RE = re.compile(
-    r"^(\[(forward|backward|left|right):(10|30|60|100)\]|\[bark:0\])+$"
+    rf"^(\[(?:forward|backward):{DIST_BIN_RE}\]|\[(?:left|right):{TURN_BIN_RE}\]|\[bark:0\])+$"
 )
 
 # Acceptable prefix: one or more calls, possibly separated by whitespace.
 PROGRAM_PREFIX_RE = re.compile(
-    r"^((?:\s*(?:\[(?:forward|backward|left|right):(?:10|30|60|100)\]|\[bark:0\]))+)"
+    rf"^((?:\s*(?:\[(?:forward|backward):{DIST_BIN_RE}\]|\[(?:left|right):{TURN_BIN_RE}\]|\[bark:0\]))+)"
 )
 
 def extract_program_prefix(text: str) -> Optional[str]:
@@ -90,7 +98,7 @@ def parse(program: str) -> Optional[List[Tuple[str, int]]]:
         j = s.find("]", i)
         if j == -1:
             return None
-        chunk = s[i+1:j]  # e.g. left:30
+        chunk = s[i+1:j]  # e.g. left:45
         if ":" not in chunk:
             return None
         tool, val_s = chunk.split(":", 1)
@@ -99,8 +107,11 @@ def parse(program: str) -> Optional[List[Tuple[str, int]]]:
         except ValueError:
             return None
         # enforce tool/val constraints
-        if tool in MOVE_TOOLS:
-            if val not in BINS:
+        if tool in DIST_TOOLS:
+            if val not in DIST_BINS:
+                return None
+        elif tool in TURN_TOOLS:
+            if val not in TURN_BINS:
                 return None
         elif tool in EVENT_TOOLS:
             if tool == "bark" and val != 0:
@@ -143,11 +154,11 @@ def first_invalid_reason(program: str) -> str:
 
 if __name__ == "__main__":
     # Basic tests
-    good = "[left:30][forward:60][bark:0]"
+    good = "[left:45][forward:60][bark:0]"
     assert is_valid(good)
-    assert parse(good) == [("left",30),("forward",60),("bark",0)]
-    bad1 = "[left:45]"
+    assert parse(good) == [("left",45),("forward",60),("bark",0)]
+    bad1 = "[left:30]"
     assert not is_valid(bad1)
-    bad2 = "left:30"
+    bad2 = "left:45"
     assert not is_valid(bad2)
     print("actions.py ok")

@@ -4,7 +4,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 SPECIAL_TOKENS = [
     "[", "]", ":", "forward", "backward", "left", "right", "bark",
-    "10", "30", "60", "100", "0"
+    "10", "30", "60", "100", "15", "45", "90", "180", "0"
 ]
 
 def load_model_and_tokenizer(model_name_or_path: str):
@@ -39,15 +39,19 @@ def write_jsonl(path: str, rows: List[Dict]):
 # We constrain generation to token sequence:
 #   "[" tool ":" value "]" (repeat) then EOS
 # tool ∈ move tools + bark
-# value ∈ {10,30,60,100} for move, {0} for bark
+# value ∈ {10,30,60,100} for forward/backward
+# value ∈ {15,45,90,180} for left/right
+# value ∈ {0} for bark
 
 def make_prefix_allowed_tokens_fn(tokenizer) -> Callable:
     tid = {t: tokenizer.convert_tokens_to_ids(t) for t in SPECIAL_TOKENS}
     eos = tokenizer.eos_token_id
 
     TOOL_IDS = [tid["forward"], tid["backward"], tid["left"], tid["right"], tid["bark"]]
-    MOVE_TOOL_IDS = [tid["forward"], tid["backward"], tid["left"], tid["right"]]
-    VAL_MOVE_IDS = [tid["10"], tid["30"], tid["60"], tid["100"]]
+    DIST_TOOL_IDS = [tid["forward"], tid["backward"]]
+    TURN_TOOL_IDS = [tid["left"], tid["right"]]
+    VAL_DIST_IDS = [tid["10"], tid["30"], tid["60"], tid["100"]]
+    VAL_TURN_IDS = [tid["15"], tid["45"], tid["90"], tid["180"]]
     VAL_BARK_ID = tid["0"]
 
     LBR = tid["["]
@@ -76,7 +80,7 @@ def make_prefix_allowed_tokens_fn(tokenizer) -> Callable:
         # We'll just run FSM on full seq but it only reacts to our special tokens.
 
         # Extract only tokens that are in our relevant set + eos
-        relevant = set([LBR, RBR, COL] + TOOL_IDS + VAL_MOVE_IDS + [VAL_BARK_ID, eos])
+        relevant = set([LBR, RBR, COL] + TOOL_IDS + VAL_DIST_IDS + VAL_TURN_IDS + [VAL_BARK_ID, eos])
         gen = [t for t in seq if t in relevant]
 
         if len(gen) == 0:
@@ -123,8 +127,10 @@ def make_prefix_allowed_tokens_fn(tokenizer) -> Callable:
             return [COL]
 
         if len(tail) == 3:
-            if tool_id in MOVE_TOOL_IDS:
-                return VAL_MOVE_IDS
+            if tool_id in DIST_TOOL_IDS:
+                return VAL_DIST_IDS
+            elif tool_id in TURN_TOOL_IDS:
+                return VAL_TURN_IDS
             else:
                 return [VAL_BARK_ID]
 

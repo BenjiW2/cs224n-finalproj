@@ -3,16 +3,22 @@ import json
 import random
 from typing import List, Tuple, Dict
 
-from .actions import MOVE_TOOLS, EVENT_TOOLS, BINS, serialize
+from .actions import DIST_TOOLS, TURN_TOOLS, MOVE_TOOLS, EVENT_TOOLS, DIST_BINS, TURN_BINS, serialize
 
 Action = Tuple[str, int]
 
 # Deterministic phrase mappings (value -> phrase options)
-INTENSITY = {
+DIST_INTENSITY = {
     10: ["a tiny bit", "slightly", "just a little"],
     30: ["a bit", "a little"],
     60: ["for a while", "some distance"],
     100: ["a lot", "for a long while"],
+}
+TURN_INTENSITY = {
+    15: ["a tiny bit", "slightly"],
+    45: ["a bit", "about a quarter turn"],
+    90: ["a lot", "about a right angle"],
+    180: ["all the way around", "about-face"],
 }
 MOVE_SYNS = {
     "forward": ["go forward", "move forward", "advance", "move ahead"],
@@ -33,7 +39,10 @@ def template_linear(actions: List[Action], rng: random.Random) -> str:
         filler = rng.choice(FILLERS).strip()
         if tool in MOVE_SYNS:
             verb = rng.choice(MOVE_SYNS[tool])
-            phrase = rng.choice(INTENSITY[val])
+            if tool in DIST_TOOLS:
+                phrase = rng.choice(DIST_INTENSITY[val])
+            else:
+                phrase = rng.choice(TURN_INTENSITY[val])
             chunk = f"{verb} {phrase}"
         else:
             chunk = rng.choice(BARK_SYNS)
@@ -59,7 +68,10 @@ def template_imperative(actions: List[Action], rng: random.Random) -> str:
     for idx, (tool, val) in enumerate(actions):
         if tool in MOVE_SYNS:
             verb = rng.choice(MOVE_SYNS[tool])
-            phrase = rng.choice(INTENSITY[val])
+            if tool in DIST_TOOLS:
+                phrase = rng.choice(DIST_INTENSITY[val])
+            else:
+                phrase = rng.choice(TURN_INTENSITY[val])
             chunk = f"{verb} {phrase}"
         else:
             chunk = rng.choice(BARK_SYNS)
@@ -76,8 +88,10 @@ def sample_program(rng: random.Random, length: int) -> List[Action]:
     actions: List[Action] = []
     for _ in range(length):
         tool = rng.choice(MOVE_TOOLS + EVENT_TOOLS)
-        if tool in MOVE_TOOLS:
-            val = rng.choice(BINS)
+        if tool in DIST_TOOLS:
+            val = rng.choice(DIST_BINS)
+        elif tool in TURN_TOOLS:
+            val = rng.choice(TURN_BINS)
         else:
             val = 0
         actions.append((tool, val))

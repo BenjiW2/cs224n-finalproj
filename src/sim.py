@@ -4,7 +4,7 @@ from typing import List, Tuple
 
 # Bin mappings (shared bins for move + turn)
 DIST_MAP = {10: 1.0, 30: 3.0, 60: 6.0, 100: 10.0}
-TURN_MAP = {10: 15.0, 30: 45.0, 60: 90.0, 100: 180.0}
+TURN_MAP = {15: 15.0, 45: 45.0, 90: 90.0, 180: 180.0}
 
 State = Tuple[float, float, float]  # x, y, heading_deg
 Action = Tuple[str, int]            # tool, val
@@ -72,9 +72,9 @@ def trajectory_score(traj: List[State], ref: List[State], alpha: float = 0.35, b
 
 if __name__ == "__main__":
     # quick sanity
-    ref = execute([("left",30),("forward",60),("bark",0)])
-    cand = execute([("left",30),("forward",60),("bark",0)])
+    ref = execute([("left",45),("forward",60),("bark",0)])
+    cand = execute([("left",45),("forward",60),("bark",0)])
     print("score same:", trajectory_score(cand, ref))
-    cand2 = execute([("right",30),("forward",60),("bark",0)])
+    cand2 = execute([("right",45),("forward",60),("bark",0)])
     print("score diff:", trajectory_score(cand2, ref))
     print("sim.py ok")
