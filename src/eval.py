@@ -6,7 +6,7 @@ from collections import Counter
 
 import torch
 
-from .utils import load_model_and_tokenizer, read_jsonl, make_prefix_allowed_tokens_fn
+from .utils import load_model_and_tokenizer, read_jsonl, write_jsonl, make_prefix_allowed_tokens_fn
 from .actions import is_valid, parse, parse_loose, extract_program_prefix, first_invalid_reason, serialize
 
 try:
@@ -140,8 +140,16 @@ def eval_file(
     fewshot_seed: int = 0,
     include_task_spec: bool = True,
     show_progress: bool = True,
+    raw_out_path: str = "",
+    model=None,
+    tok=None,
 ):
-    model, tok = load_model_and_tokenizer(model_path)
+    if (model is None) != (tok is None):
+        raise ValueError("Pass both `model` and `tok`, or neither.")
+
+    if model is None and tok is None:
+        model, tok = load_model_and_tokenizer(model_path)
+
     model.eval()
 
     rows = read_jsonl(test_path)
@@ -154,6 +162,7 @@ def eval_file(
     edit_tools = []
     length_ok = 0
     invalid_reasons = Counter()
+    raw_rows: List[Dict] = []
 
     row_iter = rows
     if show_progress and tqdm is not None:
@@ -180,6 +189,18 @@ def eval_file(
             metrics["valid"] += 1
         else:
             invalid_reasons[first_invalid_reason(pred_prog)] += 1
+
+        if raw_out_path:
+            raw_rows.append({
+                "instruction": str(r.get("instruction", "")),
+                "gold_program": gold_prog,
+                "pred_program": pred_prog,
+                "strict_valid": bool(strict_valid),
+                "num_shots": int(num_shots),
+                "include_task_spec": int(bool(include_task_spec)),
+                "test_path": test_path,
+                "model": model_path,
+            })
         
         pred_actions = parse_loose(pred_prog)  # best-effort parse
         if pred_actions is not None:
@@ -229,6 +250,8 @@ def eval_file(
         "include_task_spec": int(bool(include_task_spec)),
         "invalid_reasons": dict(invalid_reasons),
     }
+    if raw_out_path:
+        write_jsonl(raw_out_path, raw_rows)
     return out
 
 def main():
@@ -243,6 +266,7 @@ def main():
     ap.add_argument("--fewshot_seed", type=int, default=0)
     ap.add_argument("--include_task_spec", type=int, default=1)
     ap.add_argument("--show_progress", type=int, default=1)
+    ap.add_argument("--raw_out", type=str, default="")
     args = ap.parse_args()
 
     res = eval_file(
@@ -256,6 +280,7 @@ def main():
         fewshot_seed=args.fewshot_seed,
         include_task_spec=bool(args.include_task_spec),
         show_progress=bool(args.show_progress),
+        raw_out_path=args.raw_out,
     )
     print(res)
 

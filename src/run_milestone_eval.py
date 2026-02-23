@@ -1,20 +1,34 @@
 import argparse
 import json
+import os
+import re
+import gc
 from typing import List
 
 try:
     from .eval import eval_file
+    from .utils import load_model_and_tokenizer
 except ImportError:
     from eval import eval_file
+    from utils import load_model_and_tokenizer
 
 try:
     from tqdm.auto import tqdm
 except Exception:
     tqdm = None
 
+try:
+    import torch
+except Exception:
+    torch = None
+
 
 def parse_csv(s: str) -> List[str]:
     return [x.strip() for x in s.split(",") if x.strip()]
+
+
+def _slugify(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", s).strip("_")
 
 
 def main():
@@ -32,6 +46,12 @@ def main():
     ap.add_argument("--fewshot_seed", type=int, default=0)
     ap.add_argument("--include_task_spec", type=int, default=1)
     ap.add_argument("--show_progress", type=int, default=1)
+    ap.add_argument(
+        "--raw_out_prefix",
+        type=str,
+        default="",
+        help="If set, write per-job raw predictions to files prefixed by this path.",
+    )
     args = ap.parse_args()
 
     models = parse_csv(args.models)
@@ -45,7 +65,36 @@ def main():
     if show_progress and tqdm is not None:
         job_iter = tqdm(jobs, desc="milestone eval", unit="job", dynamic_ncols=True)
 
+    current_model_name = None
+    current_model = None
+    current_tok = None
+
     for model, test_path, num_shots in job_iter:
+        if model != current_model_name:
+            if current_model is not None:
+                del current_model
+                del current_tok
+                current_model = None
+                current_tok = None
+                gc.collect()
+                if torch is not None and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+            print(f"[info] loading model: {model}")
+            current_model, current_tok = load_model_and_tokenizer(model)
+            current_model.eval()
+            current_model_name = model
+
+        raw_out_path = ""
+        if args.raw_out_prefix:
+            raw_out_path = (
+                f"{args.raw_out_prefix}"
+                f"_{_slugify(model)}_{_slugify(test_path)}_shot{int(num_shots)}.jsonl"
+            )
+            raw_dir = os.path.dirname(raw_out_path)
+            if raw_dir:
+                os.makedirs(raw_dir, exist_ok=True)
+
         res = {
             "model": model,
             "test": test_path,
@@ -55,6 +104,8 @@ def main():
             "num_shots": int(num_shots),
             "include_task_spec": int(bool(args.include_task_spec)),
         }
+        if raw_out_path:
+            res["raw_out"] = raw_out_path
         try:
             metrics = eval_file(
                 model_path=model,
@@ -67,6 +118,9 @@ def main():
                 fewshot_seed=args.fewshot_seed,
                 include_task_spec=bool(args.include_task_spec),
                 show_progress=show_progress,
+                raw_out_path=raw_out_path,
+                model=current_model,
+                tok=current_tok,
             )
             res.update(metrics)
             res["status"] = "ok"
@@ -79,6 +133,13 @@ def main():
     with open(args.out, "w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+    if current_model is not None:
+        del current_model
+        del current_tok
+        gc.collect()
+        if torch is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     print(f"Wrote {len(rows)} rows to {args.out}")
 
