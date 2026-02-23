@@ -9,6 +9,11 @@ import torch
 from .utils import load_model_and_tokenizer, read_jsonl, make_prefix_allowed_tokens_fn
 from .actions import is_valid, parse, parse_loose, extract_program_prefix, first_invalid_reason, serialize
 
+try:
+    from tqdm.auto import tqdm
+except Exception:
+    tqdm = None
+
 PROMPT_TMPL = "Instruction: {instr}\nAction sequence:"
 DEMO_TMPL = "Instruction: {instr}\nAction sequence: {prog}"
 TASK_SPEC = (
@@ -98,6 +103,7 @@ def generate_program(
     prompt_parts.append(PROMPT_TMPL.format(instr=instruction))
     prompt = "\n\n".join(prompt_parts)
     inputs = tok(prompt, return_tensors="pt")
+    prompt_len = inputs["input_ids"].shape[1]
     gen_kwargs = dict(
         max_new_tokens=max_new_tokens,
         pad_token_id=tok.eos_token_id,
@@ -108,11 +114,10 @@ def generate_program(
         gen_kwargs.update(dict(do_sample=True, temperature=temperature, top_p=0.95))
 
     if constrained:
-        gen_kwargs["prefix_allowed_tokens_fn"] = make_prefix_allowed_tokens_fn(tok)
+        gen_kwargs["prefix_allowed_tokens_fn"] = make_prefix_allowed_tokens_fn(tok, prompt_len=prompt_len)
 
     out = model.generate(**inputs, **gen_kwargs)
-    prompt_len = inputs["input_ids"].shape[1]
-    completion = tok.decode(out[0][prompt_len:], skip_special_tokens=True)
+    completion = tok.decode(out[0][prompt_len:], skip_special_tokens=False)
     prog = extract_program_prefix(completion)
     if prog is None:
         # Fall back to a tolerant parser (handles leading model chatter before calls).
@@ -120,7 +125,8 @@ def generate_program(
         if acts is not None:
             prog = serialize(acts)
     if prog is None:
-        prog = completion.strip().splitlines()[0].strip()
+        stripped = completion.strip()
+        prog = stripped.splitlines()[0].strip() if stripped else ""
     return prog
 
 def eval_file(
@@ -133,6 +139,7 @@ def eval_file(
     num_shots: int = 0,
     fewshot_seed: int = 0,
     include_task_spec: bool = True,
+    show_progress: bool = True,
 ):
     model, tok = load_model_and_tokenizer(model_path)
     model.eval()
@@ -148,7 +155,11 @@ def eval_file(
     length_ok = 0
     invalid_reasons = Counter()
 
-    for r in rows:
+    row_iter = rows
+    if show_progress and tqdm is not None:
+        row_iter = tqdm(rows, desc=f"eval {test_path}", unit="ex", dynamic_ncols=True)
+
+    for r in row_iter:
         gold_prog = r["program"].strip()
         gold_actions = parse(gold_prog)
 
@@ -231,6 +242,7 @@ def main():
     ap.add_argument("--num_shots", type=int, default=0)
     ap.add_argument("--fewshot_seed", type=int, default=0)
     ap.add_argument("--include_task_spec", type=int, default=1)
+    ap.add_argument("--show_progress", type=int, default=1)
     args = ap.parse_args()
 
     res = eval_file(
@@ -243,6 +255,7 @@ def main():
         num_shots=args.num_shots,
         fewshot_seed=args.fewshot_seed,
         include_task_spec=bool(args.include_task_spec),
+        show_progress=bool(args.show_progress),
     )
     print(res)
 

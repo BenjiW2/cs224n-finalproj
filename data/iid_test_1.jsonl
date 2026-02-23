@@ -1,0 +1,1 @@
+{"instruction": "carefully let out a bark, next kind of veer left about a right angle, next rotate right a tiny bit", "program": "[bark:0][left:90][right:15]", "actions": [["bark", 0], ["left", 90], ["right", 15]], "length": 3, "template_id": "linear"}

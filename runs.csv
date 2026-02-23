@@ -1,0 +1,41 @@
+num_shots,instruction,gold_program,completion_raw,strict_valid
+0,"carefully move forward slightly, after that move ahead slightly, then kind of bark, then okay move ahead just a little",[forward:10][forward:10][bark:0][forward:10],[left:15],True
+0,"First, move back a little. Then, go backward a tiny bit.",[backward:30][backward:10],[left:15],True
+0,"First, turn right a lot.",[right:90],[right:15],True
+0,"carefully rotate right a lot, and then kind of move ahead some distance, after that please rotate right slightly.",[right:90][forward:60][right:15],[right:15],True
+0,kind of let out a bark.,[bark:0],[left:15],True
+0,"First, rotate right a tiny bit. Then, rotate left a lot.",[right:15][left:90],[right:15],True
+0,"back up for a while, then okay reverse a lot, and then turn right about a right angle, next um back up a tiny bit",[backward:60][backward:100][right:90][backward:10],[left:15],True
+0,"First, bark. Then, turn left a bit.",[bark:0][left:45],[left:15],True
+0,"carefully rotate right a lot, and then kind of move ahead some distance, after that please rotate right slightly.",[right:90][forward:60][right:15],[right:15],True
+0,"move back a tiny bit, then kind of move ahead just a little, after that turn right slightly, then turn left a lot",[backward:10][forward:10][right:15][left:90],[left:15],True
+0,"kind of make a bark sound, and then carefully go backward a tiny bit, and then please veer right a bit, then um go forward for a while",[bark:0][backward:10][right:45][forward:60],[left:15],True
+0,"um rotate left a tiny bit, then make a bark sound",[left:15][bark:0],[left:15],True
+0,"kind of rotate right about-face, after that please go forward some distance, next go backward a little.",[right:180][forward:60][backward:30],[left:15],True
+0,"First, move ahead a little. Then, veer right about a quarter turn.",[forward:30][right:45],[left:15],True
+0,"First, go backward a lot. Then, rotate right a lot.",[backward:100][right:90],[backward:10],True
+0,"First, turn right all the way around. Then, bark. After that, veer right about a right angle.",[right:180][bark:0][right:90],[left:180][forward:10],True
+0,"go forward a bit, after that move forward for a long while.",[forward:30][forward:100],[forward:10],True
+0,"First, make a bark sound. Then, advance some distance. After that, go forward slightly.",[bark:0][forward:60][forward:10],[left:15],True
+0,"um let out a bark, and then veer left a lot",[bark:0][left:90],[left:15],True
+0,"okay make a bark sound, then okay move back for a long while, and then um move back for a long while.",[bark:0][backward:100][backward:100],[left:15],True
+4,"carefully move forward slightly, after that move ahead slightly, then kind of bark, then okay move ahead just a little",[forward:10][forward:10][bark:0][forward:10],[forward:10][forward:10],True
+4,"First, move back a little. Then, go backward a tiny bit.",[backward:30][backward:10],[backward:10],True
+4,"First, turn right a lot.",[right:90],[right:45],True
+4,"carefully rotate right a lot, and then kind of move ahead some distance, after that please rotate right slightly.",[right:90][forward:60][right:15],[right:15],True
+4,kind of let out a bark.,[bark:0],[left:15],True
+4,"First, rotate right a tiny bit. Then, rotate left a lot.",[right:15][left:90],[right:15],True
+4,"back up for a while, then okay reverse a lot, and then turn right about a right angle, next um back up a tiny bit",[backward:60][backward:100][right:90][backward:10],[backward:10][backward:10][right:15],True
+4,"First, bark. Then, turn left a bit.",[bark:0][left:45],[left:15],True
+4,"carefully rotate right a lot, and then kind of move ahead some distance, after that please rotate right slightly.",[right:90][forward:60][right:15],[right:15],True
+4,"move back a tiny bit, then kind of move ahead just a little, after that turn right slightly, then turn left a lot",[backward:10][forward:10][right:15][left:90],[left:15],True
+4,"kind of make a bark sound, and then carefully go backward a tiny bit, and then please veer right a bit, then um go forward for a while",[bark:0][backward:10][right:45][forward:60],[right:15],True
+4,"um rotate left a tiny bit, then make a bark sound",[left:15][bark:0],[left:15],True
+4,"kind of rotate right about-face, after that please go forward some distance, next go backward a little.",[right:180][forward:60][backward:30],[right:15],True
+4,"First, move ahead a little. Then, veer right about a quarter turn.",[forward:30][right:45],[forward:10],True
+4,"First, go backward a lot. Then, rotate right a lot.",[backward:100][right:90],[backward:10],True
+4,"First, turn right all the way around. Then, bark. After that, veer right about a right angle.",[right:180][bark:0][right:90],[right:15],True
+4,"go forward a bit, after that move forward for a long while.",[forward:30][forward:100],[forward:10],True
+4,"First, make a bark sound. Then, advance some distance. After that, go forward slightly.",[bark:0][forward:60][forward:10],[forward:10],True
+4,"um let out a bark, and then veer left a lot",[bark:0][left:90],[left:15],True
+4,"okay make a bark sound, then okay move back for a long while, and then um move back for a long while.",[bark:0][backward:100][backward:100],[right:15],True

@@ -1,0 +1,5 @@
+{"instruction": "carefully move forward slightly, after that move ahead slightly, then kind of bark, then okay move ahead just a little", "program": "[forward:10][forward:10][bark:0][forward:10]", "actions": [["forward", 10], ["forward", 10], ["bark", 0], ["forward", 10]], "length": 4, "template_id": "linear"}
+{"instruction": "First, move back a little. Then, go backward a tiny bit.", "program": "[backward:30][backward:10]", "actions": [["backward", 30], ["backward", 10]], "length": 2, "template_id": "imperative"}
+{"instruction": "First, turn right a lot.", "program": "[right:90]", "actions": [["right", 90]], "length": 1, "template_id": "imperative"}
+{"instruction": "carefully rotate right a lot, and then kind of move ahead some distance, after that please rotate right slightly.", "program": "[right:90][forward:60][right:15]", "actions": [["right", 90], ["forward", 60], ["right", 15]], "length": 3, "template_id": "linear"}
+{"instruction": "kind of let out a bark.", "program": "[bark:0]", "actions": [["bark", 0]], "length": 1, "template_id": "linear"}

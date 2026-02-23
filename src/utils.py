@@ -15,9 +15,19 @@ def load_model_and_tokenizer(model_name_or_path: str):
     tok.pad_token = tok.eos_token
     model.config.pad_token_id = tok.eos_token_id
 
-    # Add special tokens (ensures they are single tokens)
-    tok.add_special_tokens({"additional_special_tokens": SPECIAL_TOKENS})
-    model.resize_token_embeddings(len(tok))
+    # Only add truly missing DSL tokens, and add them as normal tokens
+    # (not special tokens) so decoding does not strip them.
+    missing = []
+    for t in SPECIAL_TOKENS:
+        tid = tok.convert_tokens_to_ids(t)
+        if tid is None:
+            missing.append(t)
+            continue
+        if tok.unk_token_id is not None and tid == tok.unk_token_id and t != tok.unk_token:
+            missing.append(t)
+    if missing:
+        tok.add_tokens(missing, special_tokens=False)
+        model.resize_token_embeddings(len(tok))
     return model, tok
 
 def read_jsonl(path: str) -> List[Dict]:
@@ -43,8 +53,13 @@ def write_jsonl(path: str, rows: List[Dict]):
 # value ∈ {15,45,90,180} for left/right
 # value ∈ {0} for bark
 
-def make_prefix_allowed_tokens_fn(tokenizer) -> Callable:
+def make_prefix_allowed_tokens_fn(tokenizer, prompt_len: int = 0) -> Callable:
     tid = {t: tokenizer.convert_tokens_to_ids(t) for t in SPECIAL_TOKENS}
+    missing = [k for (k, v) in tid.items() if v is None]
+    if missing:
+        raise ValueError(f"Missing DSL token ids in tokenizer: {missing}")
+
+    prompt_len = max(int(prompt_len), 0)
     eos = tokenizer.eos_token_id
 
     TOOL_IDS = [tid["forward"], tid["backward"], tid["left"], tid["right"], tid["bark"]]
@@ -70,10 +85,25 @@ def make_prefix_allowed_tokens_fn(tokenizer) -> Callable:
     #   state=3 with move or bark; we store last tool id in a closure via parsing the prefix tokens.
 
     def allowed(batch_id: int, input_ids) -> List[int]:
-        # input_ids includes the prompt + generated tokens.
-        # We only want to constrain the newly generated portion, but easiest is:
-        # detect last occurrences of SPECIAL tokens since prompt likely doesn't include them.
-        seq = input_ids[batch_id].tolist()
+        # `transformers` may pass either:
+        # - a batched tensor/list (shape [batch, seq]) or
+        # - a single sequence tensor/list (shape [seq]).
+        # Normalize both cases to a flat Python token-id list.
+        if hasattr(input_ids, "tolist"):
+            raw = input_ids.tolist()
+        else:
+            raw = input_ids
+
+        if isinstance(raw, list) and raw and isinstance(raw[0], list):
+            seq = raw[batch_id]
+        elif isinstance(raw, list):
+            seq = raw
+        else:
+            seq = [int(raw)]
+
+        # Constrain only on the generated suffix, never on prompt tokens.
+        if prompt_len:
+            seq = seq[prompt_len:] if len(seq) >= prompt_len else []
 
         # Find where generation likely started: assume after last occurrence of "Action sequence:" the model begins.
         # If you want cleaner, keep prompt without these special tokens so FSM sees none in prompt.

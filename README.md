@@ -36,10 +36,6 @@ Bin values:
 - `src/splits.py`: split creation and distribution stats.
 - `src/train_sft.py`: SFT training with Hugging Face `Trainer`.
 - `src/eval.py`: decoding + evaluation metrics.
-<<<<<<< HEAD
-- `src/self_train.py`: candidate generation + pseudo-label filtering.
-=======
->>>>>>> 2bbbbf042721049016cb4f386fffde61580d833a
 - `src/utils.py`: model/tokenizer loading and constrained decoding FSM.
 - `src/score_predictions.py`: model-agnostic evaluator for predicted programs.
 - `src/run_milestone_eval.py`: run a model/split/shot evaluation matrix and save JSONL.
@@ -52,10 +48,157 @@ From repo root:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install torch transformers accelerate
+pip install torch transformers accelerate sentencepiece
 ```
 
 Recommended Python: 3.10+.
+
+## Cloud Runbook (Recommended For Low-Spec Laptops)
+
+If your local machine is RAM/storage constrained, run experiments on a cloud GPU VM and keep the same commands.
+
+### 1) Provision a GPU VM (GCP credits)
+
+Create one Ubuntu VM with:
+
+- 1 GPU (`T4` is fine for pretrained eval; use a larger GPU if SFT OOMs)
+- at least 4 vCPU and 16 GB RAM
+- at least 100 GB disk
+
+Then SSH into the VM.
+
+### 2) Install project + dependencies on VM
+
+```bash
+sudo apt update
+sudo apt install -y git python3-venv
+
+git clone <your-repo-url>
+cd cs224n-finalproj
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install torch transformers accelerate sentencepiece
+```
+
+### 3) Smoke test first (single example, zero-shot)
+
+If your clone does not already contain `data/*.jsonl`, generate data and splits first:
+
+```bash
+mkdir -p data outputs
+
+python -m src.data_gen \
+  --out data/synth.jsonl \
+  --n_programs 6000 \
+  --k_paraphrases 3 \
+  --min_len 1 \
+  --max_len 4 \
+  --seed 0
+
+python -m src.splits \
+  --infile data/synth.jsonl \
+  --outdir data \
+  --seed 0 \
+  --iid_train 14000 \
+  --iid_dev 2000 \
+  --iid_test 2000
+
+head -n 1024 data/iid_train.jsonl > data/iid_train_tiny.jsonl
+head -n 256 data/iid_test.jsonl > data/iid_test_tiny.jsonl
+head -n 256 data/len_test.jsonl > data/len_test_tiny.jsonl
+head -n 256 data/held_test.jsonl > data/held_test_tiny.jsonl
+head -n 256 data/held_control.jsonl > data/held_control_tiny.jsonl
+```
+
+Then run the smoke test:
+
+```bash
+head -n 1 data/iid_test_tiny.jsonl > data/iid_test_tiny_1.jsonl
+
+python -m src.eval \
+  --model Qwen/Qwen3-1.7B \
+  --test data/iid_test_tiny_1.jsonl \
+  --constrained 1 \
+  --num_shots 0 \
+  --include_task_spec 1 \
+  --temperature 0.0 \
+  --max_new_tokens 24
+```
+
+Only continue once this succeeds.
+
+### 4) Run pretrained baselines (0-shot + 4-shot)
+
+Tiny split first:
+
+```bash
+python -m src.run_milestone_eval \
+  --models Qwen/Qwen3-1.7B \
+  --tests data/iid_test_tiny.jsonl,data/len_test_tiny.jsonl,data/held_test_tiny.jsonl,data/held_control_tiny.jsonl \
+  --fewshot_path data/iid_train_tiny.jsonl \
+  --num_shots_list 0,4 \
+  --constrained 1 \
+  --include_task_spec 1 \
+  --temperature 0.0 \
+  --out outputs/qwen17b_pre_tiny.jsonl
+```
+
+Then full milestone splits:
+
+```bash
+python -m src.run_milestone_eval \
+  --models Qwen/Qwen3-1.7B \
+  --tests data/iid_test.jsonl,data/len_test.jsonl,data/held_test.jsonl,data/held_control.jsonl \
+  --fewshot_path data/iid_train.jsonl \
+  --num_shots_list 0,4 \
+  --constrained 1 \
+  --include_task_spec 1 \
+  --temperature 0.0 \
+  --out outputs/qwen17b_pre_full.jsonl
+```
+
+### 5) SFT and evaluate again
+
+Start with `Qwen/Qwen3-0.6B` for SFT if compute is tight.
+
+```bash
+python -m src.train_sft \
+  --model Qwen/Qwen3-0.6B \
+  --train data/iid_train.jsonl \
+  --dev data/iid_dev.jsonl \
+  --out outputs/qwen06b_sft_iid \
+  --epochs 1 \
+  --lr 2e-5 \
+  --bsz 1 \
+  --grad_accum 16 \
+  --max_length 128 \
+  --fp16
+```
+
+Evaluate SFT checkpoint:
+
+```bash
+python -m src.run_milestone_eval \
+  --models outputs/qwen06b_sft_iid \
+  --tests data/iid_test.jsonl,data/len_test.jsonl,data/held_test.jsonl,data/held_control.jsonl \
+  --num_shots_list 0 \
+  --constrained 1 \
+  --include_task_spec 0 \
+  --temperature 0.0 \
+  --out outputs/qwen06b_sft_full.jsonl
+```
+
+### 6) Copy results back to laptop
+
+From your laptop:
+
+```bash
+gcloud compute scp <vm-name>:~/cs224n-finalproj/outputs/*.jsonl outputs/ --zone <your-zone>
+```
+
+This keeps your local machine light while preserving the same reproducible pipeline.
 
 ## Data Format
 
@@ -324,4 +467,3 @@ python3 -m src.score_predictions \
 - `tool_step_precision`, `tool_step_recall`, `tool_step_f1`: positional step match on tool identity only.
 - `tool_edit_dist`: Levenshtein distance on tool sequences.
 - `length_acc`: exact action-count match.
-
