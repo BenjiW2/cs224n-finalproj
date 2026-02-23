@@ -325,6 +325,3 @@ python3 -m src.score_predictions \
 - `tool_edit_dist`: Levenshtein distance on tool sequences.
 - `length_acc`: exact action-count match.
 
-## Notes / Current Limitations
-
-- `src/actions.py` defines `first_invalid_reason` twice; the second definition overrides the first.
