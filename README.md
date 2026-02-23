@@ -5,19 +5,18 @@ This repo trains and evaluates a model that maps natural language instructions t
 Example:
 
 - Instruction: `turn left a bit, then move forward for a while, then bark`
-- Program: `[left:30][forward:60][bark:0]`
+- Program: `[left:45][forward:60][bark:0]`
 
 The codebase includes:
 
 - synthetic data generation
 - challenge split construction (IID, length generalization, held-out compositions)
 - supervised fine-tuning (SFT) on GPT-2
-- evaluation with strict and trajectory-based metrics
-- a pseudo-label/self-training step
+- evaluation with strict syntax and sequence-level metrics
 
 ## Action Semantics
 
-The action DSL is in `src/actions.py`, and execution semantics are in `src/sim.py`.
+The action DSL is in `src/actions.py`.
 
 - `[forward:v]`: move forward by distance bin `v`
 - `[backward:v]`: move backward by distance bin `v`
@@ -27,8 +26,8 @@ The action DSL is in `src/actions.py`, and execution semantics are in `src/sim.p
 
 Bin values:
 
-- Distance bins map to `{10:1.0, 30:3.0, 60:6.0, 100:10.0}`
-- Turn bins map to `{10:15°, 30:45°, 60:90°, 100:180°}`
+- Distance bins (`forward/backward`) are `{10, 30, 60, 100}`
+- Turn-angle bins (`left/right`) are `{15, 45, 90, 180}`
 
 ## Repository Layout
 
@@ -37,10 +36,12 @@ Bin values:
 - `src/splits.py`: split creation and distribution stats.
 - `src/train_sft.py`: SFT training with Hugging Face `Trainer`.
 - `src/eval.py`: decoding + evaluation metrics.
+<<<<<<< HEAD
 - `src/self_train.py`: candidate generation + pseudo-label filtering.
+=======
+>>>>>>> 2bbbbf042721049016cb4f386fffde61580d833a
 - `src/utils.py`: model/tokenizer loading and constrained decoding FSM.
 - `src/score_predictions.py`: model-agnostic evaluator for predicted programs.
-- `src/make_baseline_preds.py`: quick oracle/random prediction generators.
 - `src/run_milestone_eval.py`: run a model/split/shot evaluation matrix and save JSONL.
 
 ## Environment Setup
@@ -65,6 +66,8 @@ JSONL rows (used by training/eval) look like:
 ```
 
 Training/eval scripts rely on `instruction` and `program`. Other fields are used for split analysis.
+
+Note: if you generated data before the angle-bin update, regenerate it. New valid turn values are `{15,45,90,180}`.
 
 ## End-to-End Pipeline
 
@@ -126,15 +129,16 @@ python3 -m src.eval \
   --test data/iid_test.jsonl \
   --constrained 1 \
   --temperature 0.0 \
+  --include_task_spec 0 \
   --max_new_tokens 64
 ```
 
 Challenge sets:
 
 ```bash
-python3 -m src.eval --model outputs/sft_base --test data/len_test.jsonl --constrained 1
-python3 -m src.eval --model outputs/sft_base --test data/held_test.jsonl --constrained 1
-python3 -m src.eval --model outputs/sft_base --test data/held_control.jsonl --constrained 1
+python3 -m src.eval --model outputs/sft_base --test data/len_test.jsonl --constrained 1 --include_task_spec 0
+python3 -m src.eval --model outputs/sft_base --test data/held_test.jsonl --constrained 1 --include_task_spec 0
+python3 -m src.eval --model outputs/sft_base --test data/held_control.jsonl --constrained 1 --include_task_spec 0
 ```
 
 Few-shot baseline (in-context demos from a train file):
@@ -147,6 +151,7 @@ python3 -m src.eval \
   --temperature 0.0 \
   --fewshot_path data/iid_train.jsonl \
   --num_shots 4 \
+  --include_task_spec 1 \
   --fewshot_seed 0
 ```
 
@@ -159,6 +164,7 @@ python3 -m src.run_milestone_eval \
   --fewshot_path data/iid_train.jsonl \
   --num_shots_list 0,4 \
   --constrained 1 \
+  --include_task_spec 1 \
   --temperature 0.0 \
   --out outputs/milestone_eval.jsonl
 ```
@@ -172,9 +178,15 @@ python3 -m src.run_milestone_eval \
   --fewshot_path data/iid_train.jsonl \
   --num_shots_list 0,4 \
   --constrained 1 \
+  --include_task_spec 1 \
   --temperature 0.0 \
   --out outputs/qwen_pretrained_matrix.jsonl
 ```
+
+Prompt note:
+
+- `--include_task_spec 1` prepends explicit format instructions (recommended for pretrained zero/few-shot baselines).
+- `--include_task_spec 0` uses only `Instruction: ... / Action sequence:` (recommended for SFT checkpoints trained with that minimal prompt format).
 
 ## Milestone Report Guide
 
@@ -191,7 +203,7 @@ Use this section as the source of truth when writing the milestone paper.
 4. Does performance drop under distribution shift (length/composition)?
    Hypothesis: `len_test` and `held_test` underperform IID.
 5. Is compositional failure specific (held-out combos) rather than general hardness?
-   Hypothesis: `held_test` < `held_control` on `tool_step_f1` and `mean_traj_score`.
+   Hypothesis: `held_test` < `held_control` on `tool_step_f1`.
 
 ### Canonical Experiment Matrix
 
@@ -199,10 +211,6 @@ Run and report these rows (minimum milestone set):
 
 | Model | Train Split | Test Split | Shots | Purpose |
 |---|---|---|---:|---|
-| Random baseline | none | `iid_test` | 0 | floor |
-| Random baseline | none | `len_test` | 0 | floor (length shift) |
-| Random baseline | none | `held_test` | 0 | floor (composition shift) |
-| Random baseline | none | `held_control` | 0 | floor control |
 | Qwen3-0.6B | none | all 4 tests | 0 | zero-shot baseline |
 | Qwen3-1.7B | none | all 4 tests | 0 | zero-shot baseline |
 | Qwen3-4B | none | all 4 tests | 0 | zero-shot baseline |
@@ -227,7 +235,6 @@ Primary (table/main claims):
 - `step_f1` (tool + value)
 - `tool_step_f1` (tool identity only)
 - `valid_rate`
-- `mean_traj_score`
 
 Secondary (diagnostics):
 
@@ -243,6 +250,8 @@ Use the following fixed settings unless explicitly ablated:
 
 - Decoding: greedy (`--temperature 0.0`)
 - Constrained decoding: on (`--constrained 1`) for main numbers
+- Pretrained baselines: `--include_task_spec 1`
+- SFT checkpoints: `--include_task_spec 0`
 - Few-shot seed: `--fewshot_seed 0`
 - Data generation seed: `--seed 0`
 - Split seed: `--seed 0`
@@ -271,7 +280,7 @@ For each key condition (at least pretrained-best and SFT model on `held_test`):
    - wrong tool identity
    - correct tools but wrong values
    - wrong sequence length
-   - near-miss trajectory (high trajectory score, low exact match)
+   - near-miss sequence (high tool overlap, low exact match)
 3. Report 3-5 representative examples with:
    - instruction
    - gold program
@@ -283,7 +292,7 @@ For each key condition (at least pretrained-best and SFT model on `held_test`):
 - Problem statement and task definition are clear.
 - Action semantics are stated (`left/right` are turns).
 - Data generation and split construction are documented.
-- Baselines include pretrained zero/few-shot and random floor.
+- Baselines include pretrained zero/few-shot.
 - Main table includes IID, length shift, held-out composition, and control.
 - Metrics include both strict and tool-only views.
 - Error analysis includes qualitative examples + category counts.
@@ -305,34 +314,6 @@ python3 -m src.score_predictions \
 - JSONL with `pred_program` (or `program`) field per row
 - plain text file with one predicted program per line
 
-Quick baselines:
-
-```bash
-# Oracle baseline (upper bound sanity check)
-python3 -m src.make_baseline_preds --gold data/iid_test.jsonl --out data/preds_oracle.jsonl --mode oracle
-python3 -m src.score_predictions --gold data/iid_test.jsonl --pred data/preds_oracle.jsonl
-
-# Random baseline
-python3 -m src.make_baseline_preds --gold data/iid_test.jsonl --out data/preds_random.jsonl --mode random --seed 0
-python3 -m src.score_predictions --gold data/iid_test.jsonl --pred data/preds_random.jsonl
-```
-
-## Self-Training (Pseudo Labels)
-
-`src/self_train.py` samples `M` candidate programs per instruction, scores each candidate against reference trajectories, and keeps high-utility pseudo labels (threshold `tau`).
-
-Current script uses hardcoded defaults and is run as:
-
-```bash
-python3 -m src.self_train
-```
-
-Defaults expect:
-
-- base checkpoint: `outputs/sft_base`
-- unlabeled file: `data/unlabeled_len234.jsonl`
-- output pseudo labels: `data/pseudo_iter1.jsonl`
-
 ## Metrics Reported (`src/eval.py`)
 
 - `valid_rate`: fraction of syntactically valid programs.
@@ -343,10 +324,7 @@ Defaults expect:
 - `tool_step_precision`, `tool_step_recall`, `tool_step_f1`: positional step match on tool identity only.
 - `tool_edit_dist`: Levenshtein distance on tool sequences.
 - `length_acc`: exact action-count match.
-- `mean_traj_score`: simulator trajectory similarity in `[0,1]`.
 
 ## Notes / Current Limitations
 
-- `src/toolformer.py` is experimental and not wired into the current pipeline.
-- `src/self_train.py` currently has no CLI args.
 - `src/actions.py` defines `first_invalid_reason` twice; the second definition overrides the first.

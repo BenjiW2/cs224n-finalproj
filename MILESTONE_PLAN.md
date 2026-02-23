@@ -7,7 +7,8 @@ This document translates the TA guidance into a concrete evaluation plan for thi
 Your current testing procedure is mostly correct. Keep it, with these fixes:
 
 1. `left` and `right` are **turns**, not directional moves with distance.  
-   Values map to angles: `10->15°`, `30->45°`, `60->90°`, `100->180°`.
+   Turn values are angles directly: `{15, 45, 90, 180}`.
+   If old data was generated with turn values `{10,30,60,100}`, regenerate splits before running experiments.
 2. Include a **control split** for compositional generalization (`held_control`) in addition to `held_test`.
 3. Include **tool-only metrics** (ignore values) in addition to exact `(tool,value)` metrics.
 4. Use **greedy decoding** (`temperature=0`) for reported numbers.
@@ -59,7 +60,6 @@ Primary:
 - `step_f1` (tool+value)
 - `tool_step_f1` (tool-only)
 - `valid_rate`
-- `mean_traj_score`
 
 Diagnostic:
 
@@ -119,6 +119,7 @@ python3 -m src.run_milestone_eval \
   --fewshot_path data/iid_train.jsonl \
   --num_shots_list 0,4 \
   --constrained 1 \
+  --include_task_spec 1 \
   --temperature 0.0 \
   --out outputs/pretrained_matrix.jsonl
 ```
@@ -148,6 +149,7 @@ python3 -m src.run_milestone_eval \
   --tests data/iid_test.jsonl,data/len_test.jsonl,data/held_test.jsonl,data/held_control.jsonl \
   --num_shots_list 0 \
   --constrained 1 \
+  --include_task_spec 0 \
   --temperature 0.0 \
   --out outputs/sft_iid_matrix.jsonl
 ```
@@ -158,14 +160,14 @@ Held:
 
 ```bash
 python3 -m src.train_sft --model gpt2 --train data/held_train.jsonl --dev data/iid_dev.jsonl --out outputs/sft_held --epochs 1 --lr 5e-5 --bsz 2 --grad_accum 16 --max_length 128
-python3 -m src.run_milestone_eval --models outputs/sft_held --tests data/held_test.jsonl,data/held_control.jsonl --num_shots_list 0 --constrained 1 --temperature 0.0 --out outputs/sft_held_matrix.jsonl
+python3 -m src.run_milestone_eval --models outputs/sft_held --tests data/held_test.jsonl,data/held_control.jsonl --num_shots_list 0 --constrained 1 --include_task_spec 0 --temperature 0.0 --out outputs/sft_held_matrix.jsonl
 ```
 
 Length:
 
 ```bash
 python3 -m src.train_sft --model gpt2 --train data/len_train.jsonl --dev data/iid_dev.jsonl --out outputs/sft_len --epochs 1 --lr 5e-5 --bsz 2 --grad_accum 16 --max_length 128
-python3 -m src.run_milestone_eval --models outputs/sft_len --tests data/len_test.jsonl --num_shots_list 0 --constrained 1 --temperature 0.0 --out outputs/sft_len_matrix.jsonl
+python3 -m src.run_milestone_eval --models outputs/sft_len --tests data/len_test.jsonl --num_shots_list 0 --constrained 1 --include_task_spec 0 --temperature 0.0 --out outputs/sft_len_matrix.jsonl
 ```
 
 ## Report Table Template
@@ -181,7 +183,7 @@ Use one row per `(model, train_split, test_split, shots)`:
 - Exact match
 - Step F1
 - Tool-step F1
-- Mean trajectory score
+- Tool edit distance
 
 ## Division Of Labor
 

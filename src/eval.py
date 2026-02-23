@@ -8,10 +8,20 @@ import torch
 
 from .utils import load_model_and_tokenizer, read_jsonl, make_prefix_allowed_tokens_fn
 from .actions import is_valid, parse, parse_loose, extract_program_prefix, first_invalid_reason, serialize
-from .sim import execute, trajectory_score
 
 PROMPT_TMPL = "Instruction: {instr}\nAction sequence:"
 DEMO_TMPL = "Instruction: {instr}\nAction sequence: {prog}"
+TASK_SPEC = (
+    "You are converting instructions into an action sequence program.\n"
+    "Output only the program, with no extra text.\n"
+    "Program format: concatenate bracketed calls with no separators.\n"
+    "Each call format: [tool:value]\n"
+    "Allowed tools: forward, backward, left, right, bark\n"
+    "Allowed values for forward/backward: 10, 30, 60, 100\n"
+    "Allowed values for left/right: 15, 45, 90, 180\n"
+    "Allowed value for bark: 0\n"
+    "Example format only: [left:45][forward:60][bark:0]"
+)
 
 def levenshtein(a: List[str], b: List[str]) -> int:
     # simple DP for small sequences
@@ -78,8 +88,15 @@ def generate_program(
     max_new_tokens: int,
     temperature: float,
     fewshot_prefix: str = "",
+    include_task_spec: bool = True,
 ):
-    prompt = fewshot_prefix + PROMPT_TMPL.format(instr=instruction)
+    prompt_parts = []
+    if include_task_spec:
+        prompt_parts.append(TASK_SPEC)
+    if fewshot_prefix:
+        prompt_parts.append(fewshot_prefix.rstrip())
+    prompt_parts.append(PROMPT_TMPL.format(instr=instruction))
+    prompt = "\n\n".join(prompt_parts)
     inputs = tok(prompt, return_tensors="pt")
     gen_kwargs = dict(
         max_new_tokens=max_new_tokens,
@@ -115,6 +132,7 @@ def eval_file(
     fewshot_path: str = "",
     num_shots: int = 0,
     fewshot_seed: int = 0,
+    include_task_spec: bool = True,
 ):
     model, tok = load_model_and_tokenizer(model_path)
     model.eval()
@@ -128,7 +146,6 @@ def eval_file(
     tprecs, trecs, tf1s = [], [], []
     edit_tools = []
     length_ok = 0
-    traj_scores = []
     invalid_reasons = Counter()
 
     for r in rows:
@@ -143,6 +160,7 @@ def eval_file(
             max_new_tokens,
             temperature,
             fewshot_prefix=fewshot_prefix,
+            include_task_spec=include_task_spec,
         )
 
         metrics["total"] += 1
@@ -174,10 +192,6 @@ def eval_file(
 
             if len(pred_actions) == len(gold_actions):
                 length_ok += 1
-
-            traj = execute(pred_actions)
-            traj_ref = execute(gold_actions)
-            traj_scores.append(trajectory_score(traj, traj_ref))
         else:
             # invalid program or parse failure
             pass
@@ -200,8 +214,8 @@ def eval_file(
         "tool_step_f1": sum(tf1s)/max(len(tf1s),1),
         "tool_edit_dist": sum(edit_tools)/max(len(edit_tools),1),
         "length_acc": length_ok / max(total,1),
-        "mean_traj_score": sum(traj_scores)/max(len(traj_scores),1),
         "num_shots": int(num_shots),
+        "include_task_spec": int(bool(include_task_spec)),
         "invalid_reasons": dict(invalid_reasons),
     }
     return out
@@ -216,6 +230,7 @@ def main():
     ap.add_argument("--fewshot_path", type=str, default="")
     ap.add_argument("--num_shots", type=int, default=0)
     ap.add_argument("--fewshot_seed", type=int, default=0)
+    ap.add_argument("--include_task_spec", type=int, default=1)
     args = ap.parse_args()
 
     res = eval_file(
@@ -227,6 +242,7 @@ def main():
         fewshot_path=args.fewshot_path,
         num_shots=args.num_shots,
         fewshot_seed=args.fewshot_seed,
+        include_task_spec=bool(args.include_task_spec),
     )
     print(res)
 

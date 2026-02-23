@@ -5,10 +5,8 @@ from typing import Dict, List, Tuple
 
 try:
     from .actions import is_valid, parse, parse_loose, first_invalid_reason
-    from .sim import execute, trajectory_score
 except ImportError:
     from actions import is_valid, parse, parse_loose, first_invalid_reason
-    from sim import execute, trajectory_score
 
 
 def read_jsonl(path: str) -> List[Dict]:
@@ -108,7 +106,6 @@ def score(gold_rows: List[Dict], preds: List[str]) -> Dict:
     tprecs, trecs, tf1s = [], [], []
     edit_tools = []
     length_ok = 0
-    traj_scores = []
 
     for row, pred_prog in zip(gold_rows, preds):
         gold_prog = str(row["program"]).strip()
@@ -148,10 +145,6 @@ def score(gold_rows: List[Dict], preds: List[str]) -> Dict:
             if len(pred_actions) == len(gold_actions):
                 length_ok += 1
 
-            traj = execute(pred_actions)
-            traj_ref = execute(gold_actions)
-            traj_scores.append(trajectory_score(traj, traj_ref))
-
     total = metrics["total"]
     parsed = metrics["parseable"]
     out = {
@@ -168,7 +161,6 @@ def score(gold_rows: List[Dict], preds: List[str]) -> Dict:
         "tool_step_f1": sum(tf1s) / max(len(tf1s), 1),
         "tool_edit_dist": sum(edit_tools) / max(len(edit_tools), 1),
         "length_acc": length_ok / max(total, 1),
-        "mean_traj_score": sum(traj_scores) / max(len(traj_scores), 1),
         "invalid_reasons": dict(invalid_reasons),
     }
     return out

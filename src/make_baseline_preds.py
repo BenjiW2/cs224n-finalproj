@@ -4,9 +4,9 @@ import random
 from typing import Dict, List, Tuple
 
 try:
-    from .actions import MOVE_TOOLS, EVENT_TOOLS, BINS, parse, serialize
+    from .actions import DIST_TOOLS, TURN_TOOLS, MOVE_TOOLS, EVENT_TOOLS, DIST_BINS, TURN_BINS, parse, serialize
 except ImportError:
-    from actions import MOVE_TOOLS, EVENT_TOOLS, BINS, parse, serialize
+    from actions import DIST_TOOLS, TURN_TOOLS, MOVE_TOOLS, EVENT_TOOLS, DIST_BINS, TURN_BINS, parse, serialize
 
 
 Action = Tuple[str, int]
@@ -27,7 +27,12 @@ def sample_program(rng: random.Random, length: int) -> List[Action]:
     actions: List[Action] = []
     for _ in range(length):
         tool = rng.choice(MOVE_TOOLS + EVENT_TOOLS)
-        val = rng.choice(BINS) if tool in MOVE_TOOLS else 0
+        if tool in DIST_TOOLS:
+            val = rng.choice(DIST_BINS)
+        elif tool in TURN_TOOLS:
+            val = rng.choice(TURN_BINS)
+        else:
+            val = 0
         actions.append((tool, val))
     return actions
 
