@@ -1,5 +1,6 @@
 import json
 from typing import Dict, List, Callable, Optional, Tuple
+import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 SPECIAL_TOKENS = [
@@ -7,9 +8,14 @@ SPECIAL_TOKENS = [
     "10", "30", "60", "100", "15", "45", "90", "180", "0"
 ]
 
-def load_model_and_tokenizer(model_name_or_path: str):
+def load_model_and_tokenizer(model_name_or_path: str, inference: bool = False):
     tok = AutoTokenizer.from_pretrained(model_name_or_path)
-    model = AutoModelForCausalLM.from_pretrained(model_name_or_path)
+    model_kwargs = {}
+    if inference and torch.cuda.is_available():
+        # Inference path: use GPU + fp16 for speed.
+        model_kwargs["torch_dtype"] = torch.float16
+        model_kwargs["device_map"] = "auto"
+    model = AutoModelForCausalLM.from_pretrained(model_name_or_path, **model_kwargs)
 
     # GPT-2 padding
     tok.pad_token = tok.eos_token
@@ -28,6 +34,11 @@ def load_model_and_tokenizer(model_name_or_path: str):
     if missing:
         tok.add_tokens(missing, special_tokens=False)
         model.resize_token_embeddings(len(tok))
+
+    # If no `device_map` was used, move to an accelerator when available.
+    if inference and not torch.cuda.is_available():
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            model = model.to("mps")
     return model, tok
 
 def read_jsonl(path: str) -> List[Dict]:

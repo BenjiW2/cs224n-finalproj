@@ -197,6 +197,11 @@ def generate_program(
     prompt_parts.append(PROMPT_TMPL.format(instr=instruction))
     prompt = "\n\n".join(prompt_parts)
     inputs = tok(prompt, return_tensors="pt")
+    try:
+        input_device = next(model.parameters()).device
+        inputs = {k: v.to(input_device) for k, v in inputs.items()}
+    except Exception:
+        pass
     prompt_len = inputs["input_ids"].shape[1]
     gen_kwargs = dict(
         max_new_tokens=max_new_tokens,
@@ -211,7 +216,8 @@ def generate_program(
         gen_kwargs["prefix_allowed_tokens_fn"] = make_prefix_allowed_tokens_fn(tok, prompt_len=prompt_len)
 
     out = model.generate(**inputs, **gen_kwargs)
-    completion = tok.decode(out[0][prompt_len:], skip_special_tokens=False)
+    completion_ids = out[0][prompt_len:].detach().cpu()
+    completion = tok.decode(completion_ids, skip_special_tokens=False)
     prog = extract_program_prefix(completion)
     if prog is None:
         # Fall back to a tolerant parser (handles leading model chatter before calls).
@@ -243,7 +249,7 @@ def eval_file(
         raise ValueError("Pass both `model` and `tok`, or neither.")
 
     if model is None and tok is None:
-        model, tok = load_model_and_tokenizer(model_path)
+        model, tok = load_model_and_tokenizer(model_path, inference=True)
 
     model.eval()
 

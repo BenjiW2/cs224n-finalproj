@@ -93,7 +93,7 @@ def main():
                         torch.cuda.empty_cache()
 
                 print(f"[info] loading model: {model}", flush=True)
-                current_model, current_tok = load_model_and_tokenizer(model)
+                current_model, current_tok = load_model_and_tokenizer(model, inference=True)
                 current_model.eval()
                 current_model_name = model
 
