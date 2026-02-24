@@ -28,6 +28,22 @@ TASK_SPEC = (
     "Example format only: [left:45][forward:60][bark:0]"
 )
 
+TARGET_DEMO_FEATURES = {
+    "tool:forward",
+    "tool:backward",
+    "tool:left",
+    "tool:right",
+    "tool:bark",
+    "dist:10",
+    "dist:30",
+    "dist:60",
+    "dist:100",
+    "turn:15",
+    "turn:45",
+    "turn:90",
+    "turn:180",
+}
+
 def levenshtein(a: List[str], b: List[str]) -> int:
     # simple DP for small sequences
     n, m = len(a), len(b)
@@ -72,14 +88,92 @@ def tool_step_f1(pred: List[Tuple[str,int]], gold: List[Tuple[str,int]]) -> Tupl
     f1 = 0.0 if (prec + rec) == 0 else (2 * prec * rec) / (prec + rec)
     return prec, rec, f1
 
-def build_fewshot_prefix(rows: List[Dict], num_shots: int, seed: int) -> str:
+def _coerce_actions(row: Dict) -> List[Tuple[str, int]]:
+    acts = row.get("actions", None)
+    out: List[Tuple[str, int]] = []
+    if isinstance(acts, list):
+        for a in acts:
+            if not isinstance(a, (list, tuple)) or len(a) != 2:
+                continue
+            t = str(a[0]).strip()
+            try:
+                v = int(a[1])
+            except Exception:
+                continue
+            out.append((t, v))
+    if out:
+        return out
+
+    prog = str(row.get("program", "")).strip()
+    parsed = parse(prog)
+    return parsed if parsed is not None else []
+
+
+def _demo_features(row: Dict) -> set:
+    feats = set()
+    for tool, val in _coerce_actions(row):
+        feats.add(f"tool:{tool}")
+        if tool in ("forward", "backward"):
+            feats.add(f"dist:{val}")
+        elif tool in ("left", "right"):
+            feats.add(f"turn:{val}")
+    return feats
+
+
+def _select_diverse_demo_indices(rows: List[Dict], num_shots: int, seed: int) -> List[int]:
+    k = min(num_shots, len(rows))
+    if k <= 0:
+        return []
+
+    rng = random.Random(seed)
+    order = list(range(len(rows)))
+    rng.shuffle(order)
+    feat_map = {i: _demo_features(rows[i]) for i in order}
+
+    uncovered = set(TARGET_DEMO_FEATURES)
+    selected: List[int] = []
+    remaining = order.copy()
+
+    while remaining and len(selected) < k:
+        best_i = None
+        best_gain = -1
+        best_feat_count = -1
+        for i in remaining:
+            feats = feat_map.get(i, set())
+            gain = len(uncovered.intersection(feats))
+            feat_count = len(feats)
+            if gain > best_gain or (gain == best_gain and feat_count > best_feat_count):
+                best_i = i
+                best_gain = gain
+                best_feat_count = feat_count
+        if best_i is None:
+            break
+        selected.append(best_i)
+        remaining.remove(best_i)
+        uncovered -= feat_map.get(best_i, set())
+
+    if len(selected) < k:
+        for i in remaining:
+            selected.append(i)
+            if len(selected) >= k:
+                break
+    return selected
+
+
+def build_fewshot_prefix(rows: List[Dict], num_shots: int, seed: int, strategy: str = "random") -> str:
     if num_shots <= 0 or len(rows) == 0:
         return ""
-    rng = random.Random(seed)
-    idxs = list(range(len(rows)))
-    rng.shuffle(idxs)
+
+    if strategy == "diverse":
+        idxs = _select_diverse_demo_indices(rows, num_shots=num_shots, seed=seed)
+    else:
+        rng = random.Random(seed)
+        idxs = list(range(len(rows)))
+        rng.shuffle(idxs)
+        idxs = idxs[:min(num_shots, len(rows))]
+
     demos = []
-    for i in idxs[:min(num_shots, len(rows))]:
+    for i in idxs:
         r = rows[i]
         demos.append(DEMO_TMPL.format(instr=str(r["instruction"]).strip(), prog=str(r["program"]).strip()))
     return "\n\n".join(demos) + "\n\n"
@@ -138,6 +232,7 @@ def eval_file(
     fewshot_path: str = "",
     num_shots: int = 0,
     fewshot_seed: int = 0,
+    fewshot_strategy: str = "random",
     include_task_spec: bool = True,
     show_progress: bool = True,
     raw_out_path: str = "",
@@ -154,7 +249,12 @@ def eval_file(
 
     rows = read_jsonl(test_path)
     fewshot_rows = read_jsonl(fewshot_path) if fewshot_path else []
-    fewshot_prefix = build_fewshot_prefix(fewshot_rows, num_shots=num_shots, seed=fewshot_seed)
+    fewshot_prefix = build_fewshot_prefix(
+        fewshot_rows,
+        num_shots=num_shots,
+        seed=fewshot_seed,
+        strategy=fewshot_strategy,
+    )
 
     metrics = Counter()
     precs, recs, f1s = [], [], []
@@ -197,6 +297,7 @@ def eval_file(
                 "pred_program": pred_prog,
                 "strict_valid": bool(strict_valid),
                 "num_shots": int(num_shots),
+                "fewshot_strategy": str(fewshot_strategy),
                 "include_task_spec": int(bool(include_task_spec)),
                 "test_path": test_path,
                 "model": model_path,
@@ -247,6 +348,7 @@ def eval_file(
         "tool_edit_dist": sum(edit_tools)/max(len(edit_tools),1),
         "length_acc": length_ok / max(total,1),
         "num_shots": int(num_shots),
+        "fewshot_strategy": str(fewshot_strategy),
         "include_task_spec": int(bool(include_task_spec)),
         "invalid_reasons": dict(invalid_reasons),
     }
@@ -264,6 +366,7 @@ def main():
     ap.add_argument("--fewshot_path", type=str, default="")
     ap.add_argument("--num_shots", type=int, default=0)
     ap.add_argument("--fewshot_seed", type=int, default=0)
+    ap.add_argument("--fewshot_strategy", type=str, default="diverse", choices=["random", "diverse"])
     ap.add_argument("--include_task_spec", type=int, default=1)
     ap.add_argument("--show_progress", type=int, default=1)
     ap.add_argument("--raw_out", type=str, default="")
@@ -278,6 +381,7 @@ def main():
         fewshot_path=args.fewshot_path,
         num_shots=args.num_shots,
         fewshot_seed=args.fewshot_seed,
+        fewshot_strategy=args.fewshot_strategy,
         include_task_spec=bool(args.include_task_spec),
         show_progress=bool(args.show_progress),
         raw_out_path=args.raw_out,

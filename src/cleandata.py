@@ -6,13 +6,22 @@ from pathlib import Path
 from typing import Dict, List
 
 
-FIELDS = [
+FULL_FIELDS = [
     "source_file",
     "line_id",
     "model",
     "test_path",
     "num_shots",
     "include_task_spec",
+    "instruction",
+    "gold_program",
+    "pred_program",
+    "strict_valid",
+]
+
+MIN_FIELDS = [
+    "model",
+    "num_shots",
     "instruction",
     "gold_program",
     "pred_program",
@@ -55,12 +64,13 @@ def load_rows(input_glob: str) -> List[Dict]:
     return rows
 
 
-def write_csv(rows: List[Dict], out_csv: Path) -> None:
+def write_csv(rows: List[Dict], out_csv: Path, fields: List[str]) -> None:
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with out_csv.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
-        w.writerows(rows)
+        for row in rows:
+            w.writerow({k: row.get(k, "") for k in fields})
 
 
 def write_txt(rows: List[Dict], out_txt: Path) -> None:
@@ -91,12 +101,20 @@ def main() -> None:
         default="outputs/*raw*.jsonl",
         help="Glob for raw prediction JSONL files.",
     )
+    ap.add_argument(
+        "--field_set",
+        type=str,
+        choices=["full", "minimal"],
+        default="full",
+        help="Choose full metadata CSV or minimal milestone CSV.",
+    )
     ap.add_argument("--out_csv", type=str, default="outputs/human_readable.csv")
     ap.add_argument("--out_txt", type=str, default="outputs/human_readable.txt")
     args = ap.parse_args()
 
     rows = load_rows(args.in_glob)
-    write_csv(rows, Path(args.out_csv))
+    fields = FULL_FIELDS if args.field_set == "full" else MIN_FIELDS
+    write_csv(rows, Path(args.out_csv), fields=fields)
     write_txt(rows, Path(args.out_txt))
     print(f"Wrote {len(rows)} rows to {args.out_csv} and {args.out_txt}")
 
