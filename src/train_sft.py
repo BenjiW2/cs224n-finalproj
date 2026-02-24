@@ -78,9 +78,23 @@ def main():
     ap.add_argument("--grad_accum", type=int, default=16)
     ap.add_argument("--max_length", type=int, default=128)
     ap.add_argument("--fp16", action="store_true")
+    ap.add_argument("--bf16", action="store_true")
     args = ap.parse_args()
 
+    if args.fp16 and args.bf16:
+        raise ValueError("Choose only one of --fp16 or --bf16.")
+
     model, tok = load_model_and_tokenizer(args.model)
+    param_dtype = next(model.parameters()).dtype
+
+    use_fp16 = bool(args.fp16)
+    use_bf16 = bool(args.bf16)
+
+    # Some Qwen checkpoints load in bf16 by default; fp16 GradScaler can fail on that.
+    if use_fp16 and not use_bf16 and param_dtype == torch.bfloat16:
+        print("[warn] Model parameters loaded as bfloat16; switching training AMP mode from fp16 -> bf16.")
+        use_fp16 = False
+        use_bf16 = True
 
     train_rows = read_jsonl(args.train)
     dev_rows = read_jsonl(args.dev)
@@ -102,7 +116,8 @@ def main():
         eval_steps=500,
         save_total_limit=2,
         report_to=[],
-        fp16=args.fp16,
+        fp16=use_fp16,
+        bf16=use_bf16,
         remove_unused_columns=False,
     )
 
