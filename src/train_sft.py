@@ -1,4 +1,5 @@
 import argparse
+import inspect
 from dataclasses import dataclass
 from typing import Dict, List
 
@@ -89,7 +90,7 @@ def main():
 
     collator = Collator(pad_token_id=tok.pad_token_id)
 
-    targs = TrainingArguments(
+    targs_kwargs = dict(
         output_dir=args.out,
         per_device_train_batch_size=args.bsz,
         per_device_eval_batch_size=args.bsz,
@@ -99,12 +100,20 @@ def main():
         logging_steps=50,
         save_steps=500,
         eval_steps=500,
-        evaluation_strategy="steps",
         save_total_limit=2,
         report_to=[],
         fp16=args.fp16,
         remove_unused_columns=False,
     )
+
+    # HF versions differ: some expect `evaluation_strategy`, newer ones use `eval_strategy`.
+    targs_params = inspect.signature(TrainingArguments.__init__).parameters
+    if "evaluation_strategy" in targs_params:
+        targs_kwargs["evaluation_strategy"] = "steps"
+    elif "eval_strategy" in targs_params:
+        targs_kwargs["eval_strategy"] = "steps"
+
+    targs = TrainingArguments(**targs_kwargs)
 
     trainer = Trainer(
         model=model,
