@@ -178,6 +178,20 @@ def build_fewshot_prefix(rows: List[Dict], num_shots: int, seed: int, strategy: 
         demos.append(DEMO_TMPL.format(instr=str(r["instruction"]).strip(), prog=str(r["program"]).strip()))
     return "\n\n".join(demos) + "\n\n"
 
+
+def build_prompt(
+    instruction: str,
+    fewshot_prefix: str = "",
+    include_task_spec: bool = True,
+) -> str:
+    prompt_parts = []
+    if include_task_spec:
+        prompt_parts.append(TASK_SPEC)
+    if fewshot_prefix:
+        prompt_parts.append(fewshot_prefix.rstrip())
+    prompt_parts.append(PROMPT_TMPL.format(instr=instruction))
+    return "\n\n".join(prompt_parts)
+
 @torch.no_grad()
 def generate_program(
     model,
@@ -188,14 +202,13 @@ def generate_program(
     temperature: float,
     fewshot_prefix: str = "",
     include_task_spec: bool = True,
+    return_details: bool = False,
 ):
-    prompt_parts = []
-    if include_task_spec:
-        prompt_parts.append(TASK_SPEC)
-    if fewshot_prefix:
-        prompt_parts.append(fewshot_prefix.rstrip())
-    prompt_parts.append(PROMPT_TMPL.format(instr=instruction))
-    prompt = "\n\n".join(prompt_parts)
+    prompt = build_prompt(
+        instruction=instruction,
+        fewshot_prefix=fewshot_prefix,
+        include_task_spec=include_task_spec,
+    )
     inputs = tok(prompt, return_tensors="pt")
     try:
         input_device = next(model.parameters()).device
@@ -227,6 +240,12 @@ def generate_program(
     if prog is None:
         stripped = completion.strip()
         prog = stripped.splitlines()[0].strip() if stripped else ""
+    if return_details:
+        return {
+            "prompt": prompt,
+            "raw_completion": completion,
+            "pred_program": prog,
+        }
     return prog
 
 def eval_file(
@@ -274,11 +293,11 @@ def eval_file(
     if show_progress and tqdm is not None:
         row_iter = tqdm(rows, desc=f"eval {test_path}", unit="ex", dynamic_ncols=True)
 
-    for r in row_iter:
+    for ex_idx, r in enumerate(row_iter):
         gold_prog = r["program"].strip()
         gold_actions = parse(gold_prog)
 
-        pred_prog = generate_program(
+        gen = generate_program(
             model,
             tok,
             r["instruction"],
@@ -287,7 +306,9 @@ def eval_file(
             temperature,
             fewshot_prefix=fewshot_prefix,
             include_task_spec=include_task_spec,
+            return_details=True,
         )
+        pred_prog = str(gen["pred_program"]).strip()
 
         metrics["total"] += 1
         strict_valid = is_valid(pred_prog)
@@ -296,22 +317,35 @@ def eval_file(
         else:
             invalid_reasons[first_invalid_reason(pred_prog)] += 1
 
-        if raw_out_path:
-            raw_rows.append({
-                "instruction": str(r.get("instruction", "")),
-                "gold_program": gold_prog,
-                "pred_program": pred_prog,
-                "strict_valid": bool(strict_valid),
-                "num_shots": int(num_shots),
-                "fewshot_strategy": str(fewshot_strategy),
-                "include_task_spec": int(bool(include_task_spec)),
-                "test_path": test_path,
-                "model": model_path,
-            })
-        
         pred_actions = parse_loose(pred_prog)  # best-effort parse
         if pred_actions is not None:
             metrics["parseable"] += 1
+
+        if raw_out_path:
+            raw_rows.append({
+                "example_idx": int(ex_idx),
+                "instruction": str(r.get("instruction", "")),
+                "prompt": str(gen["prompt"]),
+                "raw_completion": str(gen["raw_completion"]),
+                "gold_program": gold_prog,
+                "pred_program": pred_prog,
+                "strict_valid": bool(strict_valid),
+                "parseable": bool(pred_actions is not None),
+                "model": model_path,
+                "test_path": test_path,
+                "num_shots": int(num_shots),
+                "fewshot_path": str(fewshot_path),
+                "fewshot_seed": int(fewshot_seed),
+                "fewshot_strategy": str(fewshot_strategy),
+                "include_task_spec": int(bool(include_task_spec)),
+                "constrained": int(bool(constrained)),
+                "max_new_tokens": int(max_new_tokens),
+                "temperature": float(temperature),
+                "template_id": r.get("template_id"),
+                "length": r.get("length"),
+                "actions": r.get("actions"),
+                "gold_row": r,
+            })
 
         if pred_actions is not None and gold_actions is not None:
             # exact match (canonical program string match)

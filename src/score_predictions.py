@@ -1,4 +1,5 @@
 import argparse
+import glob
 import json
 from collections import Counter
 from typing import Dict, List, Tuple
@@ -48,6 +49,17 @@ def read_predictions(path: str, pred_key: str) -> List[str]:
             else:
                 preds.append("")
     return preds
+
+
+def read_raw_rows(path: str) -> List[Dict]:
+    rows: List[Dict] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rows.append(json.loads(line))
+    return rows
 
 
 def levenshtein(a: List[str], b: List[str]) -> int:
@@ -166,18 +178,71 @@ def score(gold_rows: List[Dict], preds: List[str]) -> Dict:
     return out
 
 
+def score_raw_rows(raw_rows: List[Dict]) -> Dict:
+    gold_rows = [{"program": str(r.get("gold_program", "")).strip()} for r in raw_rows]
+    preds = [str(r.get("pred_program", "")).strip() for r in raw_rows]
+    out = score(gold_rows, preds)
+    if raw_rows:
+        first = raw_rows[0]
+        for key in [
+            "model",
+            "test_path",
+            "num_shots",
+            "fewshot_strategy",
+            "include_task_spec",
+            "constrained",
+            "max_new_tokens",
+            "temperature",
+        ]:
+            if key in first:
+                out[key] = first[key]
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--gold", type=str, required=True, help="Gold JSONL with `program` field.")
+    ap.add_argument("--gold", type=str, default="", help="Gold JSONL with `program` field.")
     ap.add_argument(
         "--pred",
         type=str,
-        required=True,
+        default="",
         help="Predictions file: JSONL rows with `pred_key` or raw programs, one per line.",
+    )
+    ap.add_argument(
+        "--raw",
+        type=str,
+        default="",
+        help="Raw eval JSONL path or glob. Each row must contain `gold_program` and `pred_program`.",
     )
     ap.add_argument("--pred_key", type=str, default="pred_program")
     ap.add_argument("--out_json", type=str, default="")
     args = ap.parse_args()
+
+    if args.raw:
+        raw_paths = sorted(glob.glob(args.raw))
+        if not raw_paths:
+            raise FileNotFoundError(f"No raw files matched: {args.raw}")
+
+        results = []
+        for raw_path in raw_paths:
+            raw_rows = read_raw_rows(raw_path)
+            res = score_raw_rows(raw_rows)
+            res["raw_path"] = raw_path
+            results.append(res)
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+
+        if args.out_json:
+            with open(args.out_json, "w", encoding="utf-8") as f:
+                if len(results) == 1:
+                    json.dump(results[0], f, indent=2, ensure_ascii=False)
+                    f.write("\n")
+                else:
+                    for res in results:
+                        f.write(json.dumps(res, ensure_ascii=False) + "\n")
+        return
+
+    if not args.gold or not args.pred:
+        raise ValueError("Provide either `--raw`, or both `--gold` and `--pred`.")
 
     gold_rows = read_jsonl(args.gold)
     preds = read_predictions(args.pred, pred_key=args.pred_key)
