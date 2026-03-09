@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Dict, List, Callable, Optional, Tuple
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -15,7 +16,14 @@ def load_model_and_tokenizer(model_name_or_path: str, inference: bool = False):
         # Inference path: use GPU + fp16 for speed.
         model_kwargs["torch_dtype"] = torch.float16
         model_kwargs["device_map"] = "auto"
-    model = AutoModelForCausalLM.from_pretrained(model_name_or_path, **model_kwargs)
+
+    adapter_cfg = os.path.join(model_name_or_path, "adapter_config.json")
+    if os.path.exists(adapter_cfg):
+        from peft import AutoPeftModelForCausalLM
+
+        model = AutoPeftModelForCausalLM.from_pretrained(model_name_or_path, **model_kwargs)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(model_name_or_path, **model_kwargs)
 
     # GPT-2 padding
     tok.pad_token = tok.eos_token
