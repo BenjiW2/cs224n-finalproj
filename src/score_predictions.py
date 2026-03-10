@@ -118,6 +118,9 @@ def score(gold_rows: List[Dict], preds: List[str]) -> Dict:
     tprecs, trecs, tf1s = [], [], []
     edit_tools = []
     length_ok = 0
+    first_call_ok = 0
+    first_tool_ok = 0
+    first_present = 0
 
     for row, pred_prog in zip(gold_rows, preds):
         gold_prog = str(row["program"]).strip()
@@ -137,6 +140,13 @@ def score(gold_rows: List[Dict], preds: List[str]) -> Dict:
         if pred_actions is not None and gold_actions is not None:
             if pred_prog.strip() == gold_prog:
                 metrics["exact"] += 1
+
+            if len(pred_actions) > 0 and len(gold_actions) > 0:
+                first_present += 1
+                if pred_actions[0] == gold_actions[0]:
+                    first_call_ok += 1
+                if pred_actions[0][0] == gold_actions[0][0]:
+                    first_tool_ok += 1
 
             p, r, f1 = step_f1(pred_actions, gold_actions)
             precs.append(p)
@@ -165,14 +175,21 @@ def score(gold_rows: List[Dict], preds: List[str]) -> Dict:
         "parseable_rate": parsed / max(total, 1),
         "exact_match": metrics["exact"] / max(total, 1),
         "tool_exact_match": metrics["tool_exact"] / max(total, 1),
+        "exact_match_ignore_magnitude": metrics["tool_exact"] / max(total, 1),
         "step_precision": sum(precs) / max(len(precs), 1),
         "step_recall": sum(recs) / max(len(recs), 1),
         "step_f1": sum(f1s) / max(len(f1s), 1),
         "tool_step_precision": sum(tprecs) / max(len(tprecs), 1),
         "tool_step_recall": sum(trecs) / max(len(trecs), 1),
         "tool_step_f1": sum(tf1s) / max(len(tf1s), 1),
+        "step_precision_ignore_magnitude": sum(tprecs) / max(len(tprecs), 1),
+        "step_recall_ignore_magnitude": sum(trecs) / max(len(trecs), 1),
+        "step_f1_ignore_magnitude": sum(tf1s) / max(len(tf1s), 1),
         "tool_edit_dist": sum(edit_tools) / max(len(edit_tools), 1),
+        "edit_dist_ignore_magnitude": sum(edit_tools) / max(len(edit_tools), 1),
         "length_acc": length_ok / max(total, 1),
+        "first_call_acc": first_call_ok / max(first_present, 1),
+        "first_tool_acc": first_tool_ok / max(first_present, 1),
         "invalid_reasons": dict(invalid_reasons),
     }
     return out
