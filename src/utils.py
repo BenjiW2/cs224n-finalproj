@@ -9,39 +9,54 @@ SPECIAL_TOKENS = [
     "10", "30", "60", "100", "15", "45", "90", "180", "0"
 ]
 
+def ensure_dsl_tokens(tokenizer) -> List[str]:
+    missing = []
+    for t in SPECIAL_TOKENS:
+        tid = tokenizer.convert_tokens_to_ids(t)
+        if tid is None:
+            missing.append(t)
+            continue
+        if tokenizer.unk_token_id is not None and tid == tokenizer.unk_token_id and t != tokenizer.unk_token:
+            missing.append(t)
+    if missing:
+        tokenizer.add_tokens(missing, special_tokens=False)
+    return missing
+
+
+def resize_model_to_tokenizer(model, tokenizer) -> None:
+    emb = model.get_input_embeddings()
+    if emb is None:
+        return
+    current_vocab = emb.weight.shape[0]
+    target_vocab = len(tokenizer)
+    if current_vocab != target_vocab:
+        model.resize_token_embeddings(target_vocab)
+
+
 def load_model_and_tokenizer(model_name_or_path: str, inference: bool = False):
     tok = AutoTokenizer.from_pretrained(model_name_or_path)
+    ensure_dsl_tokens(tok)
     model_kwargs = {}
     if inference and torch.cuda.is_available():
         # Inference path: use GPU + fp16 for speed.
-        model_kwargs["torch_dtype"] = torch.float16
+        model_kwargs["dtype"] = torch.float16
         model_kwargs["device_map"] = "auto"
 
     adapter_cfg = os.path.join(model_name_or_path, "adapter_config.json")
     if os.path.exists(adapter_cfg):
-        from peft import AutoPeftModelForCausalLM
+        from peft import PeftConfig, PeftModel
 
-        model = AutoPeftModelForCausalLM.from_pretrained(model_name_or_path, **model_kwargs)
+        peft_cfg = PeftConfig.from_pretrained(model_name_or_path)
+        base_model = AutoModelForCausalLM.from_pretrained(peft_cfg.base_model_name_or_path, **model_kwargs)
+        resize_model_to_tokenizer(base_model, tok)
+        model = PeftModel.from_pretrained(base_model, model_name_or_path)
     else:
         model = AutoModelForCausalLM.from_pretrained(model_name_or_path, **model_kwargs)
+        resize_model_to_tokenizer(model, tok)
 
     # GPT-2 padding
     tok.pad_token = tok.eos_token
     model.config.pad_token_id = tok.eos_token_id
-
-    # Only add truly missing DSL tokens, and add them as normal tokens
-    # (not special tokens) so decoding does not strip them.
-    missing = []
-    for t in SPECIAL_TOKENS:
-        tid = tok.convert_tokens_to_ids(t)
-        if tid is None:
-            missing.append(t)
-            continue
-        if tok.unk_token_id is not None and tid == tok.unk_token_id and t != tok.unk_token:
-            missing.append(t)
-    if missing:
-        tok.add_tokens(missing, special_tokens=False)
-        model.resize_token_embeddings(len(tok))
 
     # If no `device_map` was used, move to an accelerator when available.
     if inference and not torch.cuda.is_available():
