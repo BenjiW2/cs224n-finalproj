@@ -87,6 +87,11 @@ def build_run_metadata(args, train_rows: List[Dict], dev_rows: List[Dict]) -> Di
         "lora_dropout": args.lora_dropout,
         "lora_target_modules": args.lora_target_modules,
         "gradient_checkpointing": bool(args.gradient_checkpointing),
+        "eval_strategy": args.eval_strategy,
+        "save_strategy": args.save_strategy,
+        "logging_steps": args.logging_steps,
+        "eval_steps": args.eval_steps,
+        "save_steps": args.save_steps,
     }
 
 
@@ -188,6 +193,8 @@ def main():
     ap.add_argument("--logging_steps", type=int, default=10)
     ap.add_argument("--eval_steps", type=int, default=50)
     ap.add_argument("--save_steps", type=int, default=200)
+    ap.add_argument("--eval_strategy", type=str, default="steps", choices=["steps", "epoch", "no"])
+    ap.add_argument("--save_strategy", type=str, default="steps", choices=["steps", "epoch", "no"])
     ap.add_argument("--include_task_spec", type=int, default=0)
     ap.add_argument("--use_lora", action="store_true")
     ap.add_argument("--lora_r", type=int, default=16)
@@ -271,8 +278,6 @@ def main():
         learning_rate=args.lr,
         num_train_epochs=args.epochs,
         logging_steps=args.logging_steps,
-        save_steps=args.save_steps,
-        eval_steps=args.eval_steps,
         save_total_limit=2,
         report_to=[],
         fp16=use_fp16,
@@ -285,9 +290,17 @@ def main():
     # HF versions differ: some expect `evaluation_strategy`, newer ones use `eval_strategy`.
     targs_params = inspect.signature(TrainingArguments.__init__).parameters
     if "evaluation_strategy" in targs_params:
-        targs_kwargs["evaluation_strategy"] = "steps"
+        targs_kwargs["evaluation_strategy"] = args.eval_strategy
     elif "eval_strategy" in targs_params:
-        targs_kwargs["eval_strategy"] = "steps"
+        targs_kwargs["eval_strategy"] = args.eval_strategy
+
+    if "save_strategy" in targs_params:
+        targs_kwargs["save_strategy"] = args.save_strategy
+
+    if args.eval_strategy == "steps":
+        targs_kwargs["eval_steps"] = args.eval_steps
+    if args.save_strategy == "steps":
+        targs_kwargs["save_steps"] = args.save_steps
 
     targs = TrainingArguments(**targs_kwargs)
 
