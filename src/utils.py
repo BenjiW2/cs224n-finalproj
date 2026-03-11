@@ -33,8 +33,37 @@ def resize_model_to_tokenizer(model, tokenizer) -> None:
         model.resize_token_embeddings(target_vocab)
 
 
+def _has_tokenizer_files(path: str) -> bool:
+    return any(
+        os.path.exists(os.path.join(path, name))
+        for name in [
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+            "sentencepiece.bpe.model",
+            "spiece.model",
+            "vocab.json",
+        ]
+    )
+
+
+def _resolve_tokenizer_source(model_name_or_path: str) -> str:
+    if not os.path.isdir(model_name_or_path):
+        return model_name_or_path
+    if _has_tokenizer_files(model_name_or_path):
+        return model_name_or_path
+
+    # HF Trainer checkpoints often omit tokenizer files; for local checkpoint dirs,
+    # fall back to the parent run directory when it contains the tokenizer artifacts.
+    parent = os.path.dirname(model_name_or_path.rstrip("/"))
+    if parent and os.path.isdir(parent) and _has_tokenizer_files(parent):
+        return parent
+    return model_name_or_path
+
+
 def load_model_and_tokenizer(model_name_or_path: str, inference: bool = False):
-    tok = AutoTokenizer.from_pretrained(model_name_or_path)
+    tok_source = _resolve_tokenizer_source(model_name_or_path)
+    tok = AutoTokenizer.from_pretrained(tok_source)
     ensure_dsl_tokens(tok)
     model_kwargs = {}
     if inference and torch.cuda.is_available():

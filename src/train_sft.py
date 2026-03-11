@@ -5,12 +5,13 @@ import json
 import math
 import os
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch
 from torch.utils.data import Dataset
 from transformers import Trainer, TrainingArguments
 
+from .actions import serialize
 from .utils import load_model_and_tokenizer, read_jsonl
 
 PROMPT_TMPL = "Instruction: {instr}\nAction sequence:"
@@ -89,9 +90,12 @@ def build_run_metadata(args, train_rows: List[Dict], dev_rows: List[Dict]) -> Di
         "gradient_checkpointing": bool(args.gradient_checkpointing),
         "eval_strategy": args.eval_strategy,
         "save_strategy": args.save_strategy,
+        "save_total_limit": args.save_total_limit,
         "logging_steps": args.logging_steps,
         "eval_steps": args.eval_steps,
         "save_steps": args.save_steps,
+        "length_weights": args.length_weights,
+        "step_weights": args.step_weights,
     }
 
 
@@ -114,6 +118,17 @@ def build_prompt(instr: str, include_task_spec: bool = False) -> str:
         return TASK_SPEC + "\n\n" + prompt
     return prompt
 
+
+def parse_weight_list(spec: str, name: str, expected_len: int = 4) -> List[float]:
+    vals = [float(x.strip()) for x in spec.split(",") if x.strip()]
+    if len(vals) != expected_len:
+        raise ValueError(f"{name} must have exactly {expected_len} comma-separated floats.")
+    return vals
+
+
+def weighting_is_active(length_weights: List[float], step_weights: List[float]) -> bool:
+    return any(abs(x - 1.0) > 1e-8 for x in length_weights + step_weights)
+
 class JsonlProgramDataset(Dataset):
     def __init__(
         self,
@@ -122,15 +137,72 @@ class JsonlProgramDataset(Dataset):
         max_length: int = 128,
         mask_output: bool = True,
         include_task_spec: bool = False,
+        length_weights: Optional[List[float]] = None,
+        step_weights: Optional[List[float]] = None,
     ):
         self.rows = rows
         self.tok = tokenizer
         self.max_length = max_length
         self.mask_output = mask_output
         self.include_task_spec = include_task_spec
+        self.length_weights = length_weights or [1.0, 1.0, 1.0, 1.0]
+        self.step_weights = step_weights or [1.0, 1.0, 1.0, 1.0]
+        self.weighted_loss = weighting_is_active(self.length_weights, self.step_weights)
 
     def __len__(self):
         return len(self.rows)
+
+    def _build_loss_weights(
+        self,
+        row: Dict,
+        prompt: str,
+        input_ids: List[int],
+        labels: List[int],
+    ) -> List[float]:
+        weights = [0.0] * len(input_ids)
+        if not self.weighted_loss:
+            return weights
+
+        length = int(row.get("length", 1))
+        ex_weight = self.length_weights[min(max(length, 1), len(self.length_weights)) - 1]
+
+        prompt_core_len = len(self.tok(prompt, add_special_tokens=False).input_ids)
+        prefix_text = prompt + " "
+        prefix_len = len(self.tok(prefix_text, add_special_tokens=False).input_ids)
+
+        # Preserve previous training behavior: the separating space before the program
+        # still contributes to loss and is weighted like step 1.
+        leading_step_weight = ex_weight * self.step_weights[0]
+        for pos in range(prompt_core_len, min(prefix_len, len(weights))):
+            if labels[pos] != -100:
+                weights[pos] = leading_step_weight
+
+        actions = [(str(t), int(v)) for (t, v) in row.get("actions", [])]
+        if not actions:
+            for pos in range(prefix_len, len(weights)):
+                if labels[pos] != -100:
+                    weights[pos] = ex_weight
+            return weights
+
+        cursor = prefix_text
+        last_end = min(prefix_len, len(weights))
+        for step_idx, action in enumerate(actions):
+            prev_len = len(self.tok(cursor, add_special_tokens=False).input_ids)
+            cursor = cursor + serialize([action])
+            next_len = len(self.tok(cursor, add_special_tokens=False).input_ids)
+            step_weight = ex_weight * self.step_weights[min(step_idx, len(self.step_weights) - 1)]
+            for pos in range(prev_len, min(next_len, len(weights))):
+                if labels[pos] != -100:
+                    weights[pos] = step_weight
+            last_end = min(next_len, len(weights))
+
+        # If truncation or tokenizer edge cases left any target tokens unassigned, give them
+        # the final step's weight rather than silently dropping them.
+        fallback_weight = ex_weight * self.step_weights[min(len(actions) - 1, len(self.step_weights) - 1)]
+        for pos in range(last_end, len(weights)):
+            if labels[pos] != -100 and weights[pos] == 0.0:
+                weights[pos] = fallback_weight
+        return weights
 
     def __getitem__(self, idx):
         r = self.rows[idx]
@@ -151,11 +223,15 @@ class JsonlProgramDataset(Dataset):
             for i in range(prompt_len):
                 labels[i] = -100
 
-        return {
+        item = {
             "input_ids": torch.tensor(input_ids, dtype=torch.long),
             "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
             "labels": torch.tensor(labels, dtype=torch.long),
         }
+        if self.weighted_loss:
+            loss_weights = self._build_loss_weights(r, prompt, input_ids, labels)
+            item["loss_weights"] = torch.tensor(loss_weights, dtype=torch.float32)
+        return item
 
 @dataclass
 class Collator:
@@ -164,17 +240,51 @@ class Collator:
         # pad to max length in batch
         max_len = max(x["input_ids"].shape[0] for x in batch)
         input_ids, attn, labels = [], [], []
+        loss_weights = []
+        has_loss_weights = "loss_weights" in batch[0]
         for x in batch:
             L = x["input_ids"].shape[0]
             pad = max_len - L
             input_ids.append(torch.cat([x["input_ids"], torch.full((pad,), self.pad_token_id, dtype=torch.long)]))
             attn.append(torch.cat([x["attention_mask"], torch.zeros((pad,), dtype=torch.long)]))
             labels.append(torch.cat([x["labels"], torch.full((pad,), -100, dtype=torch.long)]))
-        return {
+            if has_loss_weights:
+                loss_weights.append(torch.cat([x["loss_weights"], torch.zeros((pad,), dtype=torch.float32)]))
+        out = {
             "input_ids": torch.stack(input_ids),
             "attention_mask": torch.stack(attn),
             "labels": torch.stack(labels),
         }
+        if has_loss_weights:
+            out["loss_weights"] = torch.stack(loss_weights)
+        return out
+
+
+class WeightedLossTrainer(Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        loss_weights = inputs.pop("loss_weights", None)
+        outputs = model(**inputs)
+        if loss_weights is None:
+            loss = outputs["loss"] if isinstance(outputs, dict) else outputs.loss
+            return (loss, outputs) if return_outputs else loss
+
+        logits = outputs["logits"] if isinstance(outputs, dict) else outputs.logits
+        labels = inputs["labels"]
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        shift_weights = loss_weights[..., 1:].contiguous().to(shift_logits.device)
+
+        loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="none")
+        token_loss = loss_fct(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            shift_labels.view(-1),
+        ).view_as(shift_labels)
+
+        valid = shift_labels.ne(-100).float()
+        weighted = token_loss * shift_weights * valid
+        denom = (shift_weights * valid).sum().clamp(min=1e-8)
+        loss = weighted.sum() / denom
+        return (loss, outputs) if return_outputs else loss
 
 def main():
     ap = argparse.ArgumentParser()
@@ -195,6 +305,7 @@ def main():
     ap.add_argument("--save_steps", type=int, default=200)
     ap.add_argument("--eval_strategy", type=str, default="steps", choices=["steps", "epoch", "no"])
     ap.add_argument("--save_strategy", type=str, default="steps", choices=["steps", "epoch", "no"])
+    ap.add_argument("--save_total_limit", type=int, default=2)
     ap.add_argument("--include_task_spec", type=int, default=0)
     ap.add_argument("--use_lora", action="store_true")
     ap.add_argument("--lora_r", type=int, default=16)
@@ -206,10 +317,25 @@ def main():
         default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
     )
     ap.add_argument("--gradient_checkpointing", action="store_true")
+    ap.add_argument(
+        "--length_weights",
+        type=str,
+        default="1.0,1.0,1.0,1.0",
+        help="Per-example weights for program lengths 1,2,3,4.",
+    )
+    ap.add_argument(
+        "--step_weights",
+        type=str,
+        default="1.0,1.0,1.0,1.0",
+        help="Per-step weights for action calls 1,2,3,4.",
+    )
     args = ap.parse_args()
 
     if args.fp16 and args.bf16:
         raise ValueError("Choose only one of --fp16 or --bf16.")
+
+    length_weights = parse_weight_list(args.length_weights, "--length_weights")
+    step_weights = parse_weight_list(args.step_weights, "--step_weights")
 
     model, tok = load_model_and_tokenizer(args.model)
     param_dtype = next(model.parameters()).dtype
@@ -254,6 +380,8 @@ def main():
         max_length=args.max_length,
         mask_output=bool(args.mask_output),
         include_task_spec=bool(args.include_task_spec),
+        length_weights=length_weights,
+        step_weights=step_weights,
     )
     dev_ds = JsonlProgramDataset(
         dev_rows,
@@ -261,6 +389,8 @@ def main():
         max_length=args.max_length,
         mask_output=bool(args.mask_output),
         include_task_spec=bool(args.include_task_spec),
+        length_weights=length_weights,
+        step_weights=step_weights,
     )
 
     run_meta = build_run_metadata(args, train_rows, dev_rows)
@@ -278,7 +408,7 @@ def main():
         learning_rate=args.lr,
         num_train_epochs=args.epochs,
         logging_steps=args.logging_steps,
-        save_total_limit=2,
+        save_total_limit=args.save_total_limit,
         report_to=[],
         fp16=use_fp16,
         bf16=use_bf16,
@@ -304,7 +434,7 @@ def main():
 
     targs = TrainingArguments(**targs_kwargs)
 
-    trainer = Trainer(
+    trainer = WeightedLossTrainer(
         model=model,
         args=targs,
         train_dataset=train_ds,
