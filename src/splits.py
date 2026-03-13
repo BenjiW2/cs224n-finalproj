@@ -33,6 +33,9 @@ def write_jsonl(path: str, rows: List[Dict]):
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
+def row_key(row: Dict) -> str:
+    return json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
 def stats(rows: List[Dict], name: str):
     lens = Counter(r["length"] for r in rows)
     tools = Counter()
@@ -53,12 +56,76 @@ def match_length_distribution(source: List[Dict], target_len_counts: Counter, rn
     for r in source:
         by_len[r["length"]].append(r)
     out = []
+    shortages = {}
     for L, cnt in target_len_counts.items():
-        pool = by_len[L]
+        pool = list(by_len[L])
         rng.shuffle(pool)
+        if len(pool) < cnt:
+            shortages[L] = (len(pool), cnt)
         out.extend(pool[:cnt])
+    if shortages:
+        detail = ", ".join(
+            f"len={length}: available={available}, needed={needed}"
+            for length, (available, needed) in sorted(shortages.items())
+        )
+        raise ValueError(
+            "Insufficient source rows to match target length distribution for held_control "
+            f"({detail}). Increase the source data or reduce the requested IID split sizes."
+        )
     rng.shuffle(out)
     return out
+
+def non_forbidden_rows(rows: List[Dict]) -> List[Dict]:
+    out = []
+    for r in rows:
+        acts = [(a[0], a[1]) for a in r["actions"]]
+        if not contains_forbidden_pair(acts, FORBIDDEN):
+            out.append(r)
+    return out
+
+def subtract_used_rows(rows: List[Dict], used_rows: List[Dict]) -> List[Dict]:
+    used_counts = Counter(row_key(r) for r in used_rows)
+    out = []
+    for r in rows:
+        key = row_key(r)
+        if used_counts[key] > 0:
+            used_counts[key] -= 1
+        else:
+            out.append(r)
+    return out
+
+def rebuild_held_control(
+    all_rows: List[Dict],
+    iid_train: List[Dict],
+    iid_dev: List[Dict],
+    iid_test: List[Dict],
+    held_test: List[Dict],
+    rng: random.Random,
+) -> List[Dict]:
+    iid_test_pool = non_forbidden_rows(iid_test)
+    unused_rows = subtract_used_rows(all_rows, iid_train + iid_dev + iid_test)
+    fallback_pool = non_forbidden_rows(unused_rows)
+    held_control_pool = iid_test_pool + fallback_pool
+    target_len = Counter(r["length"] for r in held_test)
+    return match_length_distribution(held_control_pool, target_len, rng)
+
+def rebuild_held_control_only(args, rng: random.Random):
+    all_rows = load_jsonl(args.infile)
+    held_test_path = args.held_test_path or f"{args.outdir}/held_test.jsonl"
+    iid_train_path = args.iid_train_path or f"{args.outdir}/iid_train.jsonl"
+    iid_dev_path = args.iid_dev_path or f"{args.outdir}/iid_dev.jsonl"
+    iid_test_path = args.iid_test_path or f"{args.outdir}/iid_test.jsonl"
+    held_control_path = args.held_control_path or f"{args.outdir}/held_control.jsonl"
+
+    iid_train = load_jsonl(iid_train_path)
+    iid_dev = load_jsonl(iid_dev_path)
+    iid_test = load_jsonl(iid_test_path)
+    held_test = load_jsonl(held_test_path)
+
+    held_control = rebuild_held_control(all_rows, iid_train, iid_dev, iid_test, held_test, rng)
+    write_jsonl(held_control_path, held_control)
+    stats(held_test, "held_test_existing")
+    stats(held_control, "held_control_rebuilt")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -70,9 +137,19 @@ def main():
     ap.add_argument("--iid_test", type=int, default=10000)
     ap.add_argument("--template_holdout", action="store_true")
     ap.add_argument("--holdout_templates", type=str, default="imperative")  # comma-separated
+    ap.add_argument("--held_control_only", action="store_true")
+    ap.add_argument("--iid_train_path", type=str, default=None)
+    ap.add_argument("--iid_dev_path", type=str, default=None)
+    ap.add_argument("--iid_test_path", type=str, default=None)
+    ap.add_argument("--held_test_path", type=str, default=None)
+    ap.add_argument("--held_control_path", type=str, default=None)
     args = ap.parse_args()
 
     rng = random.Random(args.seed)
+    if args.held_control_only:
+        rebuild_held_control_only(args, rng)
+        return
+
     rows = load_jsonl(args.infile)
     rng.shuffle(rows)
 
@@ -89,7 +166,6 @@ def main():
     iid_train = train_pool[:args.iid_train]
     iid_dev = train_pool[args.iid_train:args.iid_train + args.iid_dev]
     iid_test = train_pool[args.iid_train + args.iid_dev: args.iid_train + args.iid_dev + args.iid_test]
-
     write_jsonl(f"{args.outdir}/iid_train.jsonl", iid_train)
     write_jsonl(f"{args.outdir}/iid_dev.jsonl", iid_dev)
     write_jsonl(f"{args.outdir}/iid_test.jsonl", iid_test)
@@ -105,25 +181,9 @@ def main():
     stats(len_test, "len_test")
 
     # Held-out composition:
-    held_train = []
-    held_test = []
-    held_control_pool = []
-
-    for r in iid_train:
-        acts = [(a[0], a[1]) for a in r["actions"]]
-        if not contains_forbidden_pair(acts, FORBIDDEN):
-            held_train.append(r)
-
-    for r in iid_test:
-        acts = [(a[0], a[1]) for a in r["actions"]]
-        if contains_forbidden_pair(acts, FORBIDDEN):
-            held_test.append(r)
-        else:
-            held_control_pool.append(r)
-
-    # Control: match length distribution to held_test
-    target_len = Counter(r["length"] for r in held_test)
-    held_control = match_length_distribution(held_control_pool, target_len, rng)
+    held_train = non_forbidden_rows(iid_train)
+    held_test = [r for r in iid_test if contains_forbidden_pair([(a[0], a[1]) for a in r["actions"]], FORBIDDEN)]
+    held_control = rebuild_held_control(rows, iid_train, iid_dev, iid_test, held_test, rng)
 
     write_jsonl(f"{args.outdir}/held_train.jsonl", held_train)
     write_jsonl(f"{args.outdir}/held_test.jsonl", held_test)
